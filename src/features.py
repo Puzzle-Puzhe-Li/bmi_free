@@ -86,7 +86,23 @@ def compute_tfr(
     return tfr
 
 def _cwt_matlab_worker(raw, freqs, kwargs):
-    """子进程入口（loky）：直接 return 结果，不需要 Queue。"""
+    """
+    子进程入口（loky）：在独立进程中运行 MATLAB CWT 计算。
+
+    Parameters
+    ----------
+    raw : mne.io.Raw
+        原始 ECoG 数据。
+    freqs : numpy.ndarray
+        中心频率数组。
+    kwargs : dict
+        转发给 _compute_tfr_cwt_matlab 的额外参数。
+
+    Returns
+    -------
+    dict
+        包含 data、times、freqs、ch_names、sfreq 的结果字典。
+    """
     result = _compute_tfr_cwt_matlab(raw, freqs, **kwargs)
     return {
         "data":     result.data,
@@ -98,9 +114,25 @@ def _cwt_matlab_worker(raw, freqs, kwargs):
 
 
 def _compute_tfr_cwt_matlab_isolated(raw, freqs, **kwargs):
-    """在独立子进程中运行 MATLAB CWT，避免 matlab.engine 污染主进程命名空间。
+    """
+    在独立子进程中运行 MATLAB CWT，避免 matlab.engine 污染主进程命名空间。
+
     使用 loky 而非 multiprocessing.Process，兼容 Jupyter Notebook。
     返回的 RawTFRArray 会继承 raw.annotations。
+
+    Parameters
+    ----------
+    raw : mne.io.Raw
+        原始 ECoG 数据。
+    freqs : numpy.ndarray
+        中心频率数组。
+    **kwargs
+        转发给 _compute_tfr_cwt_matlab 的额外参数。
+
+    Returns
+    -------
+    mne.time_frequency.RawTFRArray
+        CWT 时频表示结果。
     """
     from loky import get_reusable_executor
     executor = get_reusable_executor(max_workers=1)
@@ -132,6 +164,27 @@ def _compute_tfr_cwt_matlab(
     voices: int = 32,
     freq_bin_edge: np.ndarray | None = None,
 ) -> "mne.time_frequency.RawTFRArray":
+    """
+    通过 MATLAB Engine 调用 Morse CWT 计算时频表示。
+
+    Parameters
+    ----------
+    raw : mne.io.Raw
+        原始 ECoG 数据。
+    freqs : numpy.ndarray
+        中心频率数组 (Hz)。
+    fs_tfr : int
+        输出时间分辨率 (Hz)，默认 300。
+    voices : int
+        每倍频程的 voices 数，默认 32。
+    freq_bin_edge : numpy.ndarray, optional
+        频率 bin 边界；None 则自动从中心频率推断。
+
+    Returns
+    -------
+    mne.time_frequency.RawTFRArray
+        CWT 时频表示，data shape: (n_channels, n_freqs, n_times)。
+    """
     import matlab.engine
 
     time_in   = raw.times      
@@ -186,6 +239,14 @@ _matlab_engine = None
 
 
 def _get_matlab_engine():
+    """
+    懒启动并返回全局唯一的 MATLAB engine 实例。
+
+    Returns
+    -------
+    matlab.engine.MatlabEngine
+        MATLAB 引擎实例。
+    """
     global _matlab_engine
     import matlab.engine
 
@@ -196,7 +257,9 @@ def _get_matlab_engine():
 
 
 def close_matlab_engine() -> None:
-    """Shut down the cached MATLAB engine."""
+    """
+    关闭并释放缓存的 MATLAB 引擎实例。
+    """
     global _matlab_engine
     if _matlab_engine is not None:
         _matlab_engine.quit()
@@ -552,6 +615,14 @@ def slice_features(
     )
 
 def show_features(X):
+    """
+    可视化特征矩阵的均值时间序列（用于检查伪迹）。
+
+    Parameters
+    ----------
+    X : numpy.ndarray
+        特征矩阵，shape (n_frames, n_channels, n_freqs, ...)。
+    """
     # 检查特征是否有伪迹
     plt.figure(figsize=(10, 3))
     plt.plot(X.mean(axis=(1, 2)))
@@ -560,6 +631,19 @@ def show_features(X):
 
 
 def select_features(features):
+    """
+    根据坏段标注筛选有效特征帧。
+
+    Parameters
+    ----------
+    features : mne.time_frequency.EpochsTFRArray
+        特征数据，info['description'] 为 session 标识符。
+
+    Returns
+    -------
+    numpy.ndarray
+        有效帧的索引数组。
+    """
 
     session = features.info["description"]
     fps = features.info['sfreq']
@@ -574,6 +658,27 @@ def select_features(features):
     return selection
 
 def select_coors(session, joint, times, query=None, involvement=None):
+    """
+    根据缺失标注和参与度标注筛选有效坐标帧。
+
+    Parameters
+    ----------
+    session : str
+        会话标识符。
+    joint : str
+        关节名称。
+    times : numpy.ndarray
+        帧时间戳数组。
+    query : str, optional
+        对缺失标注表的筛选查询表达式。
+    involvement : str, optional
+        若提供，则只保留该参与度标注覆盖的帧。
+
+    Returns
+    -------
+    numpy.ndarray
+        有效帧的索引数组。
+    """
     
     df_miss = import_miss(session, query=query)
 
@@ -593,6 +698,29 @@ def select_coors(session, joint, times, query=None, involvement=None):
 
 
 def select_features_and_coors(features, df_vel0, feature_selection=None, coor_selection=None, frame_range=(None, None)):
+    """
+    对特征和坐标数据取交集筛选。
+
+    Parameters
+    ----------
+    features : mne.time_frequency.EpochsTFRArray
+        特征数据。
+    df_vel0 : pandas.DataFrame
+        速度数据。
+    feature_selection : numpy.ndarray, optional
+        特征有效帧索引；None 表示全部保留。
+    coor_selection : numpy.ndarray, optional
+        坐标有效帧索引；None 表示全部保留。
+    frame_range : tuple of (int or None, int or None)
+        帧范围 [start, end] 筛选。
+
+    Returns
+    -------
+    features_sel : mne.time_frequency.EpochsTFRArray
+        筛选后的特征数据。
+    df_vel_sel : pandas.DataFrame
+        筛选后的速度数据。
+    """
     if feature_selection is None:
         feature_selection = np.arange(len(features))
     if coor_selection is None:
@@ -609,10 +737,25 @@ def select_features_and_coors(features, df_vel0, feature_selection=None, coor_se
 
 def shuffle_X(X, shuffle_dims=(0, 1, 2, 3), seed=None, save_as=None):
     """
-    X: (frame, channel, freq, time) 或任意维度数组，dim0 为样本维
-    shuffle_dims: 0 表示打乱 frame 顺序（全局 permutation）
-                  1/2/3 表示对应特征维在每个样本内独立打乱
-    save_as: 若给出路径，把复现所需的索引存为 pickle
+    对特征矩阵的指定维度做打乱（用于置换检验）。
+
+    Parameters
+    ----------
+    X : numpy.ndarray, shape (n_frame, n_channel, n_freq, n_time)
+        特征矩阵，dim 0 为样本维。
+    shuffle_dims : tuple of int
+        要打乱的维度索引：
+        - 0：打乱 frame 顺序（全局 permutation）
+        - 1/2/3：对应特征维在每个样本内独立打乱
+    seed : int, optional
+        随机种子。
+    save_as : str or Path, optional
+        若提供，将复现所需的索引字典存为 pickle 文件。
+
+    Returns
+    -------
+    numpy.ndarray
+        打乱后的数组。
     """
     rng = np.random.default_rng(seed)
     X = X.copy()
@@ -640,8 +783,23 @@ def shuffle_X(X, shuffle_dims=(0, 1, 2, 3), seed=None, save_as=None):
 
 def apply_shuffle(X, path):
     """
-    用 load 回来的 index_dict 复现打乱后的 X。
-    注意：dim0 的 permutation 必须最先应用（和 shuffle_X 里的顺序一致），
+    用保存的索引字典复现打乱后的 X。
+
+    Parameters
+    ----------
+    X : numpy.ndarray
+        原始特征数组，shape (n_frames, n_channels, n_freqs, n_times)。
+    path : str or Path
+        pickle 文件路径，包含 shuffle_X 保存的 index_dict。
+
+    Returns
+    -------
+    numpy.ndarray
+        按保存的索引重排后的数组。
+
+    Notes
+    -----
+    dim0 的 permutation 必须最先应用（与 shuffle_X 里的顺序一致），
     之后各特征维按 index_dict 里保存的每样本索引重排。
     """
 

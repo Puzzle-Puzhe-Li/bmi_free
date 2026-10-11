@@ -61,7 +61,22 @@ def cal_vector(
     write_norm: bool = False,
 ):
     """
-    data: (T, 3)
+    将 (T, 3) 的向量数据写入输出字典。
+
+    Parameters
+    ----------
+    out : dict
+        输出字典，键为 (bodypart, quantity) 元组。
+    bp : str
+        身体部位名称。
+    prefix : str
+        量名称前缀（如 'pos'、'vel'、'acc'）。
+    data : numpy.ndarray, shape (T, 3)
+        向量时间序列数据。
+    write_abs : bool
+        若 True，同时写入各分量的绝对值。
+    write_norm : bool
+        若 True，同时写入向量的范数。
     """
 
     for i, ax in enumerate(AXES):
@@ -75,6 +90,21 @@ def cal_vector(
         out[(bp, f'{prefix}_norm')] = np.linalg.norm(data, axis=1)
 
 def diff(arr: np.ndarray, dt: float) -> np.ndarray:
+    """
+    沿 axis=0 的前向差分（第一行补零）。
+
+    Parameters
+    ----------
+    arr : numpy.ndarray
+        输入数组，shape (T, ...)。
+    dt : float
+        时间步长。
+
+    Returns
+    -------
+    numpy.ndarray
+        差分结果，shape 与 arr 相同，第一行为零。
+    """
     return np.vstack([
         np.zeros(arr.shape[1]),
         np.diff(arr, axis=0) / dt
@@ -82,6 +112,22 @@ def diff(arr: np.ndarray, dt: float) -> np.ndarray:
 
 
 def cal_kinematics(df_pos: pd.DataFrame, fps: int = 30) -> pd.DataFrame:
+    """
+    计算各身体部位的位置、速度和加速度。
+
+    Parameters
+    ----------
+    df_pos : pandas.DataFrame
+        位置数据，双层列索引 (bodypart, dim)，dim 为 'x'/'y'/'z'。
+    fps : int
+        采样帧率，默认 30。
+
+    Returns
+    -------
+    pandas.DataFrame
+        运动学数据，双层列索引 (bodypart, quantity)，包含 pos/vel/acc
+        各分量及其绝对值和范数。
+    """
     dt = 1 / fps
     bodyparts = df_pos.columns.get_level_values(0).unique()
     out = {}

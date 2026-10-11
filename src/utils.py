@@ -6,7 +6,25 @@ from pathlib import Path
 # import mne
 
 def shuffle(X, dim, rng):
-    """对 X 的 dim 维做打乱，每个样本(axis 0)独立使用不同的打乱方式，返回结果和用到的索引。"""
+    """
+    对 X 的指定维度做打乱，每个样本 (axis 0) 独立使用不同的打乱方式。
+
+    Parameters
+    ----------
+    X : numpy.ndarray
+        输入数组。
+    dim : int
+        要打乱的维度索引。
+    rng : numpy.random.Generator
+        随机数生成器。
+
+    Returns
+    -------
+    X_shuffled : numpy.ndarray
+        打乱后的数组。
+    perm_idx : numpy.ndarray
+        使用的排列索引，shape (N, size_d)。
+    """
     X = np.moveaxis(X, dim, 1)          # -> (N, size_d, ...)
     N, size_d = X.shape[0], X.shape[1]
 
@@ -21,6 +39,27 @@ def shuffle(X, dim, rng):
 
 
 def select_epoch(epoch_start, epoch_end, annot_start, annot_end, remove_annot=True):
+    """
+    根据标注区间筛选 epoch，返回与标注无重叠（或有重叠）的 epoch 索引。
+
+    Parameters
+    ----------
+    epoch_start : array-like
+        各 epoch 的起始时间。
+    epoch_end : array-like
+        各 epoch 的结束时间。
+    annot_start : array-like
+        各标注的起始时间。
+    annot_end : array-like
+        各标注的结束时间。
+    remove_annot : bool
+        若 True，返回与标注无重叠的 epoch；若 False，返回与标注有重叠的 epoch。
+
+    Returns
+    -------
+    tuple of numpy.ndarray
+        符合条件的 epoch 索引（元组格式，可直接用于 numpy 索引）。
+    """
 
     epoch_start = np.asarray(epoch_start)
     epoch_end = np.asarray(epoch_end)
@@ -40,6 +79,21 @@ def select_epoch(epoch_start, epoch_end, annot_start, annot_end, remove_annot=Tr
     return np.where(mask)
 
 def apply_transformation(cage_points, transformation_matrix):
+    """
+    对 3D 点集施加齐次变换矩阵。
+
+    Parameters
+    ----------
+    cage_points : numpy.ndarray, shape (N, 3)
+        待变换的 3D 点坐标。
+    transformation_matrix : numpy.ndarray, shape (4, 4)
+        齐次变换矩阵。
+
+    Returns
+    -------
+    numpy.ndarray, shape (N, 3)
+        变换后的 3D 点坐标。
+    """
     # 将cage_points转换为齐次坐标
     num_points = cage_points.shape[0]
     homogeneous_points = np.hstack(
@@ -86,6 +140,24 @@ class Tag(dict):
         return result
     
 def simp_idx(nums):
+    """
+    将整数列表压缩为简洁的区间表示字符串。
+
+    Parameters
+    ----------
+    nums : iterable of int
+        整数列表。
+
+    Returns
+    -------
+    str
+        压缩后的区间表示，如 '[1-3, 5, 7-9]'。
+
+    Examples
+    --------
+    >>> simp_idx([1, 2, 3, 5, 7, 8, 9])
+    '[1-3, 5, 7-9]'
+    """
     nums = sorted(set(nums))
     groups = []
     start = end = nums[0]
@@ -98,19 +170,24 @@ def simp_idx(nums):
     groups.append(f'{start}-{end}' if start != end else str(start))
     return '[' + ', '.join(groups) + ']'
 
-def p2aster(pval):
-    if pval < 0.001:
-        return '***'
-    elif pval < 0.01:
-        return '**'
-    elif pval < 0.05:
-        return '*'
-    else:
-        return 'n.s'
-
-
-
 def p2aster(pval, thresholds='Regular'):
+    """
+    将 p 值转换为显著性星号标记。
+
+    Parameters
+    ----------
+    pval : float
+        p 值。
+    thresholds : {'Regular', 'Loose'}
+        显著性阈值方案：
+        - 'Regular' : 0.001 → '***', 0.01 → '**', 0.05 → '*'
+        - 'Loose' : 额外包含 0.1 → '.'
+
+    Returns
+    -------
+    str
+        显著性标记，如 '***'、'**'、'*'、'.' 或 'n.s'。
+    """
     if thresholds == 'Regular':
         map = {0.001: '***', 0.01: '**', 0.05: '*'}
     elif thresholds == 'Loose':

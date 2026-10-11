@@ -82,6 +82,19 @@ def _coor_row_to_V(row):
     return np.stack(coords, axis=0)  # [N_joint, 3]
 
 def _row_joints(row):
+    """
+    从 coor 行中提取关节名称列表。
+
+    Parameters
+    ----------
+    row : pd.Series or pd.DataFrame
+        单行或多行坐标数据。
+
+    Returns
+    -------
+    list of str
+        关节名称列表。
+    """
     if isinstance(row, pd.DataFrame):
         return row.index.tolist()
     return row.index.get_level_values(0).unique().tolist()
@@ -428,12 +441,37 @@ def _display_matlab_figure(eng, fig_handle, img_format="png", dpi=150):
 
 
 def _to_matlab_view(view):
+    """
+    将 Python view 列表转换为 MATLAB double 数组。
+
+    Parameters
+    ----------
+    view : list or None
+        视角参数列表。
+
+    Returns
+    -------
+    matlab.double
+        MATLAB 兼容的 double 数组。
+    """
     import matlab
     return matlab.double(list(view)) if view is not None else matlab.double([])
 
 
 def _to_matlab_idx(idx_arr):
-    """0-based numpy 索引矩阵 -> 1-based matlab.double；空则返回 matlab.double([])"""
+    """
+    将 0-based numpy 索引矩阵转换为 1-based MATLAB double 数组。
+
+    Parameters
+    ----------
+    idx_arr : numpy.ndarray
+        0-based 索引矩阵。
+
+    Returns
+    -------
+    matlab.double
+        1-based MATLAB 索引数组；空则返回 matlab.double([])。
+    """
     import matlab
     return matlab.double((idx_arr + 1).tolist()) if len(idx_arr) else matlab.double([])
 
@@ -834,6 +872,25 @@ def compute_crossings(df, edges=None, epsilon=1e-8, return_details=False):
         return sum(summary.values())
 
 def compute_skeleton_prop(df_pc, rdm_r=True, df_pc_vel=None, **kwargs):
+    """
+    计算骨架属性指标（交叉次数、平均距离、RDM 相关系数）。
+
+    Parameters
+    ----------
+    df_pc : pandas.DataFrame
+        骨架主成分坐标，index 为关节名，列为 PC 维度。
+    rdm_r : bool
+        若 True，计算与速度 PC 的 RDM 相关系数。
+    df_pc_vel : pandas.DataFrame, optional
+        速度 PC 数据；None 则自动调用 import_pc 加载。
+    **kwargs
+        转发给 import_pc 的额外参数。
+
+    Returns
+    -------
+    pandas.Series
+        包含 n_cross、d、rdm_r（可选）等指标的序列。
+    """
     prop = {}
     n_cross = compute_crossings(df_pc)
     prop['n_cross'] = n_cross
@@ -846,4 +903,3 @@ def compute_skeleton_prop(df_pc, rdm_r=True, df_pc_vel=None, **kwargs):
         prop['rdm_r'] = res['corr']
 
     return pd.Series(prop)
-    

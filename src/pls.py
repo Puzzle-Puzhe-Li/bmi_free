@@ -37,20 +37,28 @@ def simp_pls_python(
 ) -> tuple:
     """
     simp_pls 的 Python 纯复现版本（无需 MATLAB）。
-    
+
     Parameters
     ----------
-    X : (T, nchan, ...) 输入特征
-    y : (T, 1) 或 (T,) 目标变量
-    ncomp : PLS 成分数
-    train_frac : 训练集比例（前段）
-    scale_X : 是否对 X 做 z-score 标准化（用训练集统计量）
-    scale_y : 是否对 y 做 z-score 标准化
-    
+    X : numpy.ndarray, shape (T, n_channels, ...)
+        输入特征矩阵。
+    y : numpy.ndarray, shape (T, 1) or (T,)
+        目标变量。
+    ncomp : int
+        PLS 成分数，默认 50。
+    train_frac : float
+        训练集比例（前段），默认 0.7。
+    scale_X : bool
+        是否对 X 做 z-score 标准化（用训练集统计量），默认 True。
+    scale_y : bool
+        是否对 y 做 z-score 标准化，默认 False。
+
     Returns
     -------
-    b : 回归系数，shape 与 X[0] 相同
-    r : 测试集 Pearson 相关系数
+    b : numpy.ndarray
+        回归系数，shape 与 X[0] 相同。
+    r : float
+        测试集 Pearson 相关系数。
     """
     orig_shape = X.shape[1:]
     T_total = X.shape[0]
@@ -90,6 +98,22 @@ def simp_pls_python(
     return b, float(r)    
 
 def zscore_feature(X):
+    """
+    对特征矩阵沿时间轴做 z-score 标准化。
+
+    对每个 (channel, freq) 组合，将所有 (frame, time) 样本做 z-score，
+    忽略 NaN。
+
+    Parameters
+    ----------
+    X : numpy.ndarray, shape (n_frame, n_channel, n_time, n_freq)
+        输入特征矩阵。
+
+    Returns
+    -------
+    numpy.ndarray
+        标准化后的特征矩阵，shape 与输入相同。
+    """
     # 假设 X_freq_time shape: (frame, channel, time, freq)
     n_frame, n_channel, n_time, n_freq = X.shape
 
@@ -420,35 +444,46 @@ def pls_joint(
     shuffle_dims=None,
     involvement=None
 ):
-    """Core per-joint PLS workflow used by pls_joints.
+    """
+    单关节 PLS 回归核心流程。
 
     Parameters
     ----------
     features : mne.time_frequency.EpochsTFRArray
-        Full feature matrix.
+        完整特征矩阵。
     df : pandas.DataFrame
-        Velocity dataframe for all joints.
+        所有关节的速度数据。
     joint : str
-        Joint name to train.
+        要训练的关节名称。
     path_out : Path
-        Output directory for model/weight files.
+        模型/权重文件输出目录。
     tag : str
-        Optional filename suffix.
+        文件名标签后缀。
     ncomp : int
-        Number of PLS components.
+        PLS 成分数。
     train_frac : float
-        Training split fraction.
+        训练集比例。
     scale_X : bool
-        Whether to standardize X.
+        是否对 X 做 z-score 标准化。
     scale_y : bool
-        Whether to standardize y.
-    save_items : list
-        Which items to save into the model payload.
+        是否对 y 做 z-score 标准化。
+    save_items : list of str
+        要保存到模型文件中的项。
+    feature_selection : numpy.ndarray, optional
+        特征有效帧索引。
+    if_export : bool
+        是否导出预测结果。
+    shuffle_dims : tuple, optional
+        要打乱的特征维度。
+    involvement : str, optional
+        参与度筛选条件。
 
     Returns
     -------
     dict
-        Result dictionary for this joint.
+        结果字典，包含 joint、r_train、r_test、r_all、y_train_pred、
+        y_test_pred、y_train、y_test、pls、sy、loaded、alive_indices、
+        n_train、t_test 等键。
     """
 
     session = features.info['description']
@@ -618,6 +653,53 @@ def pls_joints(
     window_s=2.0,
     overlap=0.2,
 ):
+    """
+    对所有关节执行 PLS 回归，可选导出预测结果 EDF。
+
+    Parameters
+    ----------
+    features : mne.time_frequency.EpochsTFRArray
+        特征数据矩阵。
+    df : pandas.DataFrame
+        速度数据，列为关节名。
+    path_out : Path
+        输出目录。
+    tag : str
+        文件名标签后缀。
+    n_jobs : int
+        并行任务数，0 表示串行。
+    verbose : int
+        并行详细度。
+    ncomp : int
+        PLS 成分数。
+    train_frac : float
+        训练集比例。
+    scale_X : bool
+        是否对 X 做 z-score 标准化。
+    scale_y : bool
+        是否对 y 做 z-score 标准化。
+    shuffle_dims : tuple, optional
+        要打乱的特征维度。
+    involvement : str, optional
+        参与度筛选条件。
+    if_export : bool
+        是否导出预测结果 EDF。
+    if_log_r : bool
+        是否打印每个关节的 r 值。
+    save_items : list of str
+        要保存到模型文件中的项。
+    vel_thr : float, optional
+        速度阈值（未使用）。
+    window_s : float
+        滑动窗口长度（秒），默认 2.0。
+    overlap : float
+        窗口重叠比例 [0, 1)，默认 0.2。
+
+    Returns
+    -------
+    list of dict
+        每个关节的 PLS 结果字典。
+    """
 
     session = features.info['description']
     sfreq = features.info['sfreq']
@@ -794,6 +876,31 @@ def pls_joints(
     
 
 def load_weights(path_out, tag="", joints=None, absolute=False, baseline=(None, None), mode='zscore', session=None):
+    """
+    加载 PLS 权重（TFR 格式），可选基线校正。
+
+    Parameters
+    ----------
+    path_out : Path
+        权重文件所在目录。
+    tag : str
+        文件名标签后缀。
+    joints : list of str, optional
+        要加载的关节列表；None 表示全部。
+    absolute : bool
+        若 True，取权重的绝对值。
+    baseline : tuple of (float or None, float or None)
+        基线校正时间窗口，默认不校正。
+    mode : str
+        基线校正模式，默认 'zscore'。
+    session : str, optional
+        若提供，只加载该会话并返回单个 TFR；否则返回所有会话的字典。
+
+    Returns
+    -------
+    mne.time_frequency.EpochsTFRArray or dict
+        若 session 不为 None，返回单个 TFR；否则返回 {session: TFR} 字典。
+    """
 
     if joints is None:
         joints = import_joints()
@@ -834,6 +941,23 @@ def load_weights(path_out, tag="", joints=None, absolute=False, baseline=(None, 
     return weights_dict
 
 def load_r(path_out, joints=None, sort_index=True):
+    """
+    加载所有会话和关节的 PLS 测试集 r 值。
+
+    Parameters
+    ----------
+    path_out : Path
+        模型文件所在目录。
+    joints : list of str, optional
+        要加载的关节列表；None 表示全部。
+    sort_index : bool
+        若 True，按 (monkey, joint) 排序索引。
+
+    Returns
+    -------
+    pandas.DataFrame
+        r 值表，包含 monkey、joint、r 列及 tag 信息。
+    """
     from joblib import load as jl_load
     import re
 
@@ -864,7 +988,20 @@ def load_r(path_out, joints=None, sort_index=True):
 
 def _infer_x(data):
     """
-    自动推断 x， 如果data里有且仅有r列，则x为"joint"，如果有除了r的另一列，则为这一列；如果除了r还多于或等于两列，则报错
+    自动推断 x 轴变量名。
+
+    若 data 中除 r、monkey、joint 外无其他列，返回 'joint'；
+    若恰好有一列，返回该列名；否则返回第一列。
+
+    Parameters
+    ----------
+    data : pandas.DataFrame
+        r 值数据表。
+
+    Returns
+    -------
+    str
+        推断的 x 轴变量名。
     """
     keys = [i for i in data.columns if i not in ['r', 'monkey', 'joint']]
     if len(keys) == 0:
@@ -875,6 +1012,22 @@ def _infer_x(data):
         return keys[0]
     
 def plot_r(data, plot_fun=sns.barplot, rot_x=False, **kwargs):
+    """
+    绘制 PLS r 值的条形图或其他统计图。
+
+    Parameters
+    ----------
+    data : str, Path, or pandas.DataFrame
+        若为路径，则调用 load_r 加载；否则直接使用。
+    plot_fun : callable
+        绘图函数，默认 sns.barplot。
+    rot_x : bool
+        若 True，旋转 x 轴标签。
+    **kwargs
+        转发给 plot_fun 的额外参数。支持特殊参数：
+        - x : str, x 轴变量名（默认自动推断）
+        - y : str, y 轴变量名（默认 'r'）
+    """
 
     df_r = load_r(data) if isinstance(data, (str, Path)) else data
 
@@ -905,6 +1058,21 @@ def plot_r(data, plot_fun=sns.barplot, rot_x=False, **kwargs):
 
 
 def stat_r(data, ctrl_group=None):
+    """
+    计算各组的 r 值统计量（均值、标准差），可选配对 t 检验。
+
+    Parameters
+    ----------
+    data : str, Path, or pandas.DataFrame
+        r 值数据。
+    ctrl_group : str, optional
+        对照组名称。若提供，则对每个非对照组与 ctrl_group 做配对 t 检验。
+
+    Returns
+    -------
+    pandas.DataFrame
+        统计结果表，包含 mean、std 及可选的 t、p 列，按 monkey 分列。
+    """
 
     df_r = load_r(data) if isinstance(data, (str, Path)) else data
 

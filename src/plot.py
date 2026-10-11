@@ -311,6 +311,19 @@ class NMTECoGMapper:
         
 
     def _convert_to_matlab_array(self, array):
+        """
+        将输入数组转换为 MATLAB 兼容的 double 数组。
+
+        Parameters
+        ----------
+        array : array-like
+            输入数组。
+
+        Returns
+        -------
+        numpy.ndarray
+            dtype 为 double 的数组。
+        """
         return np.array(array).astype('double')
 
     # ======================================================================
@@ -319,8 +332,21 @@ class NMTECoGMapper:
 
     def _check_values(self, values, picks):
         """
-        将不同类型的 values 统一整理为
-        (channels, samples, groups) 的三维 numpy 数组。
+        将不同类型的 values 统一整理为 (channels, samples, groups) 的三维 numpy 数组。
+
+        Parameters
+        ----------
+        values : numpy.ndarray, pandas.Series, pandas.DataFrame, or array-like
+            输入数据，支持 1–3 维。
+        picks : list of str or int, optional
+            通道名称或索引列表。
+
+        Returns
+        -------
+        arr : numpy.ndarray, shape (n_channels, n_samples, n_groups)
+            规范化后的三维数组。
+        picks : list
+            通道名称列表。
         """
 
         def _is_str_axis(obj):
@@ -419,8 +445,21 @@ class NMTECoGMapper:
 
     def _compute_maps(self, values, picks, savepath):
         """
-        compute 层：逐样本 × 分组调用 MATLAB，
-        每一次调用都会生成一个临时 png 文件。
+        逐样本 × 分组调用 MATLAB nmt_ecog_map，每次生成一张临时 png。
+
+        Parameters
+        ----------
+        values : numpy.ndarray, shape (n_channels, n_samples, n_groups)
+            输入数据。
+        picks : list
+            通道名称列表。
+        savepath : str or Path, optional
+            图片保存路径；None 则自动生成临时文件名。
+
+        Returns
+        -------
+        dict
+            键为 (sample_idx, group_idx)，值为 MATLAB 返回的输出字典。
         """
 
         auto_save = True if savepath is None else False
@@ -445,13 +484,44 @@ class NMTECoGMapper:
         return outputs
 
     def _render_single(self, ax, png_path):
-        """render 层：将单张 png 渲染到 matplotlib Axes"""
+        """
+        将单张 png 渲染到 matplotlib Axes。
+
+        Parameters
+        ----------
+        ax : matplotlib.axes.Axes
+            目标坐标轴。
+        png_path : str
+            png 文件路径。
+        """
         ax.imshow(plt.imread(png_path))
         ax.axis("off")
 
     def _layout_maps(self, outputs, n_samples, n_groups, share_x, share_y, row_labels, col_labels):
         """
-        layout 层：拼接所有子图，并根据 share_x / share_y 控制 colorbar。
+        拼接所有子图，并根据 share_x / share_y 控制 colorbar 显示。
+
+        Parameters
+        ----------
+        outputs : dict
+            _compute_maps 的返回值。
+        n_samples : int
+            样本数（列数）。
+        n_groups : int
+            分组数（行数）。
+        share_x : bool
+            是否在列间共享颜色范围。
+        share_y : bool
+            是否在行间共享颜色范围。
+        row_labels : list of str, optional
+            行标签。
+        col_labels : list of str, optional
+            列标签。
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+            拼接后的图形。
         """
         margin = 0.75
 
@@ -497,6 +567,32 @@ class NMTECoGMapper:
     def map(self, values, picks=None, plot=True, share_x=False, share_y=False, savepath=None, row_labels=None, col_labels=None, **kwargs):
         """
         高层接口：完成 values 规范化 → MATLAB 计算 → 图像布局。
+
+        Parameters
+        ----------
+        values : numpy.ndarray, pandas.Series, pandas.DataFrame, or array-like
+            输入数据。
+        picks : list, optional
+            通道名称列表。
+        plot : bool
+            若 True，返回 fig；否则返回 None。
+        share_x : bool
+            列间共享颜色范围。
+        share_y : bool
+            行间共享颜色范围。
+        savepath : str or Path, optional
+            图片保存路径。
+        row_labels : list of str, optional
+            行标签。
+        col_labels : list of str, optional
+            列标签。
+        **kwargs
+            转发给 set() 的额外配置参数。
+
+        Returns
+        -------
+        matplotlib.figure.Figure or None
+            若 plot=True 返回图形，否则返回 None。
         """
         values, picks = self._check_values(values, picks)
         n_ch, n_samp, n_grp = values.shape
@@ -531,6 +627,19 @@ class NMTECoGMapper:
     # ======================================================================
 
     def _check_cmap(self, cmap):
+        """
+        检查并转换 colormap 为 MATLAB 兼容的 (256, 3) RGB 数组。
+
+        Parameters
+        ----------
+        cmap : str or matplotlib.colors.Colormap
+            colormap 名称或对象。
+
+        Returns
+        -------
+        numpy.ndarray, shape (256, 3)
+            RGB 颜色表。
+        """
         if isinstance(cmap, str):
             if cmap not in plt.colormaps():
                 raise ValueError(f"{cmap} 不是 matplotlib 内置 colormap")
@@ -542,11 +651,34 @@ class NMTECoGMapper:
         return cmap
 
     def _check_colorbar(self, colorbar):
+        """
+        检查 colorbar 参数并记录是否需要绘制 colorbar。
+
+        Parameters
+        ----------
+        colorbar : str
+            'yes' 或 'no'。
+
+        Returns
+        -------
+        str
+            始终返回 'no'（MATLAB 侧不画 colorbar，由 Python 侧控制）。
+        """
         self.plot_colorbar = (colorbar == "yes")
         return "no"
     
 
     def colorbar(self, fig, ax):
+        """
+        在指定坐标轴的右侧添加 colorbar。
+
+        Parameters
+        ----------
+        fig : matplotlib.figure.Figure
+            目标图形。
+        ax : matplotlib.axes.Axes
+            目标坐标轴。
+        """
         norm = plt.Normalize(
             self.ft_cfg["funcolorlim"][0][0],
             self.ft_cfg["funcolorlim"][0][1]
@@ -559,7 +691,9 @@ class NMTECoGMapper:
         )
 
     def close(self):
-        """关闭 MATLAB 引擎"""
+        """
+        关闭 MATLAB 引擎实例。
+        """
         if hasattr(self, "eng"):
             self.eng.quit()
 
@@ -571,6 +705,26 @@ class NMTECoGMapper:
 #     plt.show()
 
 def plot_ica_properties_grid(ica, inst, **kwargs):
+    """
+    以网格布局绘制 ICA 各分量的属性图（拓扑、ERP 图像、ERP、PSD、方差）。
+
+    Parameters
+    ----------
+    ica : mne.preprocessing.ICA
+        拟合好的 ICA 对象。
+    inst : mne.io.Raw
+        原始数据对象。
+    **kwargs
+        转发给 ica.plot_properties 的额外参数。
+        支持特殊参数：
+        - picks : 范围或列表，选择要绘制的 IC 索引
+        - psd_args : dict，传给 PSD 绘制的参数
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        绘制好的图形。
+    """
     picks = kwargs.pop('picks', range(ica.n_components))
     psd_args = kwargs.pop('psd_args', {'fmax': 150}) 
     n_components = len(picks)
