@@ -808,7 +808,7 @@ def plot_ica_properties_grid(ica, inst, **kwargs):
     width_ratios = kwargs.pop('width_ratios', (1, 2, 2, 40))
     var_hist_ratio = kwargs.pop('var_hist_ratio', width_ratios[3]*3)   
 
-    fs, lw = 2, 0.2   # 字号 (pt) 和线宽 (pt)
+    fs, lw = 2, 0.1   # 字号 (pt) 和线宽 (pt)
     tick_major, tick_minor = 1.2, 0.7
     plt.rcParams.update({
         'font.size': fs, 'axes.labelsize': fs, 'axes.titlesize': fs,
@@ -822,13 +822,18 @@ def plot_ica_properties_grid(ica, inst, **kwargs):
 
     n_components = len(picks)
 
+    from bmi_free.viz.cortex import plot_topomap, build_montage
+    montage = build_montage()
+    components = ica.get_components()          # (n_channels, n_components)
+    ica_ch_names = list(ica.ch_names)    
+
     fig = plt.figure(figsize=(10, n_components * 0.2))
 
     outer = gridspec.GridSpec(
         n_components, 4,
         figure=fig,
         hspace=0.15,
-        wspace=0.1,
+        wspace=0.05,
         width_ratios=list(width_ratios), 
     )
 
@@ -851,7 +856,7 @@ def plot_ica_properties_grid(ica, inst, **kwargs):
     hist_axes = []  
 
     for row, ic_idx in enumerate(picks):
-        ax_topo     = add(outer[row, 0], xkey='topo')
+        ax_topo     = fig.add_subplot(outer[row, 0])  
         ax_spectrum = add(outer[row, 2], xkey='spectrum', ykey='spectrum')
         ax_variance = add(outer[row, 3], xkey='variance')
 
@@ -870,6 +875,18 @@ def plot_ica_properties_grid(ica, inst, **kwargs):
             verbose="Critical",
             **kwargs
         )
+
+        # ---- 用 cortex.plot_topomap 替换 MNE 自带拓扑图 ----
+        ax_topo.clear()
+        plot_topomap(
+            components[:, ic_idx],
+            montage=montage,
+            ch_names=ica_ch_names,
+            ax=ax_topo,
+            show_colorbar=False,
+            interp_resolution=150,     # 默认 1000 太慢，小图 150 足够
+            frame_lw=lw,
+        )        
 
         # ---- PSD y 轴: 主刻度 100，次刻度 10，不显示数字 ----
         ax_spectrum.yaxis.set_major_locator(ticker.MultipleLocator(100))
@@ -897,16 +914,18 @@ def plot_ica_properties_grid(ica, inst, **kwargs):
 
         # 三个图都隐藏 y 轴刻度标签（保留刻度线和 y 轴标题）
         for ax in (ax_image, ax_erp, ax_variance):
+            ax.yaxis.labelpad = 1.5
             ax.tick_params(axis='y', which='both', labelleft=False, labelright=False)        
 
-        ax_topo.set_ylabel(f"IC {ic_idx:03d}", fontsize=fs*2)
+        ax_topo.text(-0.05, 0.5, f"IC {ic_idx:03d}", transform=ax_topo.transAxes,
+                     rotation=90, ha='right', va='center', fontsize=fs*2)
         for ax in [ax_topo, ax_image, ax_spectrum, ax_variance]:
             ax.set_title("")
         ax_spectrum.set_ylabel("PSD (dB/Hz)")
 
         # 缩小散点
         for collection in ax_variance.collections:
-            collection.set_sizes([0.5])
+            collection.set_sizes([0.3])
             collection.set_linewidth(0)
 
         # 对 variance 轴进行自定义刻度
@@ -973,7 +992,7 @@ def plot_ica_properties_grid(ica, inst, **kwargs):
         ax.tick_params(which='minor', length=tick_minor)
 
     plt.tight_layout()
-    fig.align_labels()
+    fig.align_xlabels()
 
     # ---- 调整方差散点图 : 直方图 = var_hist_ratio : 1 ----
     fig.canvas.draw()   # 让 axes_grid1 的 locator 先算出实际位置
