@@ -40,14 +40,15 @@ def compute_tfr(
 
     Parameters
     ----------
-    raw : ndarray, shape (n_channels, n_samples)
-        Raw signal, already time-delay corrected.
+    raw : mne.io.Raw
+        Raw ECoG data, already time-delay corrected.
     freqs : ndarray, shape (n_freq_bins,)
         Centre frequencies of the desired frequency bins (Hz).
         Bin edges are inferred as midpoints between consecutive centres, with
         symmetric half-steps at both ends.
     method : str
         ``'cwt_matlab'`` – Morse CWT via MATLAB engine.
+        ``'morlet'`` / ``'multitaper'`` – MNE built-in TFR methods.
     **kwargs
         Forwarded to the selected backend.
 
@@ -60,6 +61,10 @@ def compute_tfr(
         Optional:
           voices        (int)     : voices-per-octave (default 32)
           freq_bin_edge (ndarray) : override auto-computed bin edges
+
+        For ``'morlet'`` / ``'multitaper'``:
+          n_cycles : (float or ndarray) – number of cycles (default freqs * 0.1)
+          fs_tfr   : (int) – output time resolution in Hz (default 300)
 
     Returns
     -------
@@ -280,30 +285,30 @@ def slice_features(
     ----------
     tfr : mne.time_frequency.RawTFR
         预计算好的 TFR，``tfr.info['sfreq']`` 为其内部时间分辨率（如 300 Hz）。
-    time_range : (t0, t1)
+    time_range : tuple of (float, float)
         每帧截取的时间窗口 [t0, t1)，单位秒（相对于帧的"0 时刻"）。
     time_step : float or None
-        **特征时间步长**（Hz）。若不为 None 且与 TFR 采样率不一致，则会在
+        **特征时间步长**（秒）。若不为 None 且与 TFR 采样率不一致，则会在
         时间窗口内将连续 ``bin_size = tfr_sfreq * time_step`` 个 TFR 点
-        做均值压缩，得到 time_step 分辨率的时间特征。默认为0.1。
+        做均值压缩，得到 time_step 分辨率的时间特征。默认为 0.1。
         None 表示不压缩，直接使用 TFR 原始时间分辨率。
 
         例：tfr_sfreq=300, time_step=0.1, time_range=(-1.5, 1.5)
             → 每帧时间窗 900 个 TFR 点，压缩为 30 个特征点。
     amp_feature : bool
-        若提供，则在每帧"0 时刻"从原始 Raw 信号中采一个幅值样本，
+        若 True，则在每帧"0 时刻"从原始 Raw 信号中采一个幅值样本，
         拼接在 TFR 特征的频率轴最前面（freq index 0），单位与 Raw 一致。
-        Raw 的采样率可与 TFR 不同，会自动匹配最近样本。
-        None 表示不包含幅值特征。
+        False 表示不包含幅值特征。
     if_show : bool
         若 True，调用 ``show_features(X)`` 可视化。
+    apply_baseline : bool
+        若 True，对 TFR 数据做基线校正。
 
     Returns
     -------
-    features : ``mne.time_frequency.EpochsTFRArray``
+    features : mne.time_frequency.EpochsTFRArray
         ``features.data`` shape:
         ``(n_frames, n_channels, n_freqs_out, n_times_out)``。
-
     """
     # ------------------------------------------------------------------ #
     # 1. 解析标注中的 sample_start / sample_end

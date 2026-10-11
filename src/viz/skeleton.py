@@ -68,8 +68,19 @@ from bmi_free.io import import_skeleton_config, import_pc
 
 def _coor_row_to_V(row):
     """
-    把 coor 的单行（pd.Series，MultiIndex index）转成 [N_joint, 3] 的 numpy 数组。
-    取每个 joint 的前3个 dim 作为空间坐标，dim 名称不限。
+    将 coor 的单行转为 [N_joint, 3] 的 numpy 数组。
+
+    取每个 joint 的前 3 个 dim 作为空间坐标，dim 名称不限。
+
+    Parameters
+    ----------
+    row : pandas.Series or pandas.DataFrame
+        单行或多行坐标数据，MultiIndex 列索引 (joint, dim)。
+
+    Returns
+    -------
+    numpy.ndarray, shape (N_joint, 3)
+        关节空间坐标数组。
     """
     if isinstance(row, pd.DataFrame):
         return row.values[:, :3].astype(float)    
@@ -101,8 +112,23 @@ def _row_joints(row):
 
 def _names_to_indices(name_pairs, joints, verbose=False):
     """
-    把 [[nameA, nameB], ...] 转成 0-based 整数索引矩阵。
+    将关节名称对列表转为 0-based 整数索引矩阵。
+
     任意一个 joint 不在 joints 里则跳过该条。
+
+    Parameters
+    ----------
+    name_pairs : list of list of str
+        关节名称对列表，如 [['Shoulder', 'Elbow'], ...]。
+    joints : list of str
+        所有关节名称列表。
+    verbose : bool
+        若 True，打印跳过的条目。
+
+    Returns
+    -------
+    numpy.ndarray, shape (M, 2)
+        整数索引矩阵；M ≤ len(name_pairs)。
     """
     joint_index = {name: i for i, name in enumerate(joints)}
     result = []
@@ -121,8 +147,17 @@ def _names_to_indices(name_pairs, joints, verbose=False):
 
 def _find_triangles(edge_idx):
     """
-    从 edge 索引 [N, 2] 中自动检测所有三角面（三条边两两相连构成闭合三角）。
-    返回 [M, 3] 的三角面索引。
+    从边索引矩阵中自动检测所有三角面（三条边两两相连构成闭合三角）。
+
+    Parameters
+    ----------
+    edge_idx : numpy.ndarray, shape (N, 2)
+        边索引矩阵。
+
+    Returns
+    -------
+    numpy.ndarray, shape (M, 3)
+        三角面索引矩阵；若无三角面则返回空数组 shape (0, 3)。
     """
     edge_set = set(map(tuple, np.sort(edge_idx, axis=1).tolist()))
     nodes = np.unique(edge_idx)
@@ -143,9 +178,18 @@ def _pad_bounds(bounds, pad=0.2):
     """
     将 bounds 向四周扩展，避免点球体和线宽在视口边缘溢出。
 
+    Parameters
+    ----------
+    bounds : list of float, length 6
+        [xmin, xmax, ymin, ymax, zmin, zmax]。
     pad : float
-        相对于各轴跨度的扩展比例（默认 20%）。
+        相对于各轴跨度的扩展比例，默认 0.2。
         若某轴跨度为 0（退化情况），则用其他轴平均跨度的 pad 倍兜底。
+
+    Returns
+    -------
+    list of float, length 6
+        扩展后的 bounds。
     """
     xmin, xmax, ymin, ymax, zmin, zmax = bounds
     spans = np.array([xmax - xmin, ymax - ymin, zmax - zmin], dtype=float)
@@ -157,12 +201,19 @@ def _pad_bounds(bounds, pad=0.2):
 
 def _compute_bounds(Vs):
     """
-    给定顶点数组列表 [N_joint, 3]，返回各帧的 bounds 以及全局 bounds。
+    给定顶点数组列表，返回各帧的 bounds 以及全局 bounds。
 
-    返回
-    ----
-    per_bounds : list of [xmin, xmax, ymin, ymax, zmin, zmax]
-    global_bounds : [xmin, xmax, ymin, ymax, zmin, zmax]
+    Parameters
+    ----------
+    Vs : list of numpy.ndarray
+        各帧顶点数组，每个 shape (N_joint, 3)。
+
+    Returns
+    -------
+    per_bounds : list of list of float
+        各帧的 [xmin, xmax, ymin, ymax, zmin, zmax]。
+    global_bounds : list of float
+        全局 [xmin, xmax, ymin, ymax, zmin, zmax]。
     """
     per_bounds = []
     for V in Vs:
@@ -508,59 +559,57 @@ def plot_skeleton_grid(
     """
     绘制骨架图：单帧或多帧网格子图，单帧只是"网格恰好是 1x1"的特例。
 
-    参数
-    ----
-    coor : pd.DataFrame
+    Parameters
+    ----------
+    coor : pandas.DataFrame
         骨架坐标表，index = 帧（行），columns = MultiIndex(joint, dim)。
-    indices : int | label | list | list[list] | None
+    indices : int, label, list, list[list], or None
         决定绘制形态：
         - 单个 int / label            : 单帧（一个子图）
         - 扁平 list（或 None=全部行）  : 多帧，按 shape 或自动排成网格
         - 嵌套 list[list[...]]        : 多帧，直接按嵌套结构指定网格排布
           （每个子 list 是网格的一行，各行长度需一致），此时忽略 shape
-    shape : (int, int) | None
+    shape : tuple of (int, int) or None
         扁平多帧场景下的子图网格 (n_rows, n_cols)；None 则自动按接近
         正方形排布。对嵌套 indices 无效（网格形状由嵌套结构决定）。
-    edges : list | None
+    edges : list or None
         骨架连接关系；None 则自动调用 import_skeleton_config()。
-    titles : list[str] | None
+    titles : list of str or None
         每个子图的标题列表，长度需与帧数一致；None 时多帧用帧 index 值
         作标题，单帧不加标题。
-    bounds : str | list, default='auto'
+    bounds : str or list, default 'auto'
         坐标轴范围控制：
         - 'auto' : 自动根据数据范围计算
         - 'cage' : 使用笼子固定范围 [[0,70], [0,100], [0,100]]
         - [[xmin,xmax], [ymin,ymax], [zmin,zmax]] : 3x2 矩阵分别指定
         - [min, max] : 1x2 矩阵，三轴共用此范围
         所有子图共用同一个（padding 后的）范围。
-    bound_scale : str, default='*1.1'
+    bound_scale : str, default '*1.1'
         范围缩放表达式，以当前范围中心为原点：'+5' / '-5' / '*1.5'。
-    save_as : str | None
+    save_as : str or None
         指定则把图窗保存为 .fig 文件（可在 MATLAB 里重新打开、继续交互式
         旋转/编辑）；默认 None，不保存。
     show : bool
         默认 True。把图窗导出为一张临时图片，在 notebook 里内联显示后
         立即删除该临时图片文件（不影响 save_as 保留的 .fig）。
-    visible : bool
-        默认 True，弹出一个真实的 MATLAB 图窗（可交互旋转）。若只想要
-        notebook 内联显示、不想每次都多开一个 MATLAB 窗口，可设为 False。
-    view : (az, el) | None
-        相机角度，沿用 MATLAB view(az,el) 的定义；None 用默认 (150, 10)。
-    show_floor / show_poles / show_walls / show_axis : bool
-        是否画地面网格 / 训练笼爬杆 / 墙壁网格与标签 / 坐标轴刻度，默认 False。
     img_format : {'png', 'svg'}
         show=True 时内联显示用的图片格式，默认 'png'。
     dpi : int
         img_format='png' 时的导出分辨率，默认 150。
-    subplot_size : (int, int)
+    subplot_size : tuple of (int, int)
         多子图时，每个子图的像素尺寸 (width, height)，用于设置图窗大小。
+    **kwargs
+        转发给 MATLAB plot_skeleton 的额外参数，如 show_floor、show_poles、
+        show_walls、show_axis、visible、view、face_color、face_alpha、
+        edge_color、line_width 等。
 
-    返回
-    ----
-    fig_handle : MATLAB 图窗句柄，可继续传给 eng.savefig 等
+    Returns
+    -------
+    matlab.engine.MatlabEngine figure handle
+        MATLAB 图窗句柄，可继续传给 eng.savefig 等。
 
-    示例
-    ----
+    Examples
+    --------
     >>> plot_skeleton_grid(coor, indices=46910)                       # 单帧
     >>> plot_skeleton_grid(coor, indices=[0, 10, 20, 30], shape=(2, 2))
     >>> plot_skeleton_grid(coor, indices=[[0, 1, 2], [3, 4, 5]])       # 显式 2x3 网格
@@ -675,26 +724,36 @@ def plot_skeleton_animation(
     注意：帧数很大时（数万帧级别），一次性传输 + 写视频耗时会比较长，
     请预留时间，或先用 coor.iloc[a:b] 截取需要的片段再调用。
 
-    参数
-    ----
-    coor : pd.DataFrame
+    Parameters
+    ----------
+    coor : pandas.DataFrame
         要渲染的帧序列（建议传入已截取好的片段，如 coor.iloc[2400:2700]）。
-    edges : list | None
+    edges : list or None
         骨架连接关系；None 则自动调用 import_skeleton_config()。
     fps : int
         帧率，默认 30。
     filename : str
         输出 mp4 文件路径。
-    bounds : str | list, default='auto'
+    bounds : str or list, default 'auto'
         坐标轴范围控制，含义同 plot_skeleton_grid；动画期间所有帧共用
         同一个范围（基于全部待渲染帧的数据算好，保持固定不随帧变化）。
-    bound_scale : str, default='*1.1'
+    bound_scale : str, default '*1.1'
         范围缩放表达式，含义同 plot_skeleton_grid。
-    visible, view, show_floor, show_poles, show_walls, show_axis :
-        含义同 plot_skeleton_grid。
+    visible : bool
+        是否弹出 MATLAB 图窗，默认 True。
+    view : tuple or None
+        相机角度 (az, el)，None 用默认值。
+    show_floor : bool
+        是否画地面网格，默认 False。
+    show_poles : bool
+        是否画训练笼爬杆，默认 False。
+    show_walls : bool
+        是否画墙壁网格与标签，默认 False。
+    show_axis : bool
+        是否画坐标轴刻度，默认 False。
 
-    示例
-    ----
+    Examples
+    --------
     >>> plot_skeleton_animation(coor.iloc[2400:2700], filename="demo.mp4")
     >>> plot_skeleton_animation(coor.iloc[2400:2700], show_floor=True, show_poles=True, view=(60, 15))
     """

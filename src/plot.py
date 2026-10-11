@@ -56,20 +56,35 @@ def plot_cube_faces(data, cmap='viridis', vmin=None, vmax=None,
 
     Parameters
     ----------
-    data : ndarray, shape (nx, ny, nz)
+    data : numpy.ndarray, shape (nx, ny, nz)
         三维数据。
-    cmap : str or Colormap
-    vmin, vmax : float, optional
-        颜色范围，默认用 data 的全局 min/max。
-    elev, azim : float
-        3D 视角。默认 (25, -45) 对应取 x=nx-1, y=0, z=nz-1 三个面朝向相机。
+    cmap : str or matplotlib.colors.Colormap
+        颜色映射，默认 'viridis'。
+    vmin : float, optional
+        颜色范围下界，默认用 data 的全局 min。
+    vmax : float, optional
+        颜色范围上界，默认用 data 的全局 max。
+    elev : float
+        3D 视角仰角，默认 25。
+    azim : float
+        3D 视角方位角，默认 -45。
+        默认 (25, -45) 对应取 x=nx-1, y=0, z=nz-1 三个面朝向相机。
         如果你改了视角，请确认对应的暴露面是否还正确。
-    ax : Axes3D, optional
+    figsize : tuple of (float, float)
+        图形大小，默认 (8, 8)。
+    title : str, optional
+        图形标题。
+    ax : matplotlib.axes.Axes, optional
         传入已有的 3D 坐标轴则画在上面，否则新建一个 figure。
 
     Returns
     -------
-    fig, ax, mappable  (mappable 可用来加 colorbar)
+    fig : matplotlib.figure.Figure
+        图形对象。
+    ax : matplotlib.axes.Axes
+        3D 坐标轴。
+    mappable : matplotlib.cm.ScalarMappable
+        可用来添加 colorbar。
     """
     data = np.asarray(data)
     if data.ndim != 3:
@@ -204,69 +219,130 @@ class NMTECoGMapper:
             inputfile=None
             ):
         """
-        ft_sourceplot configuration parameters
+        设置 FieldTrip ft_sourceplot 的配置参数。
 
-        Args:
-            method (str): visualization method ('ortho', 'slice', 'surface', 'glassbrain', 'vertex', 'cloud')
-            anaparameter (str): field in data with the anatomical data
-            funparameter (str): field in data with the functional parameter of interest
-            maskparameter (str): field in the data to be used for opacity masking of fun data
-            maskstyle (str): mask style ('opacity', 'colormix')
-            downsample (int): downsampling for resolution reduction
-            atlas (str): filename of atlas to use
-            visible (str): whether figure will be visible ('on', 'off')
-            figure (str): whether to open a new figure ('yes', 'no')
-            position (list): location and size of the figure [left bottom width height]
-            renderer (str): renderer ('opengl', 'zbuffer', 'painters')
-            funcolormap (colormap for functional data, see COLORMAP): 
-            funcolorlim (color range of the functional data): 
-            colorbar (str): whether to show colorbar ('yes', 'no')
-            colorbartext (str): text next to colorbar
-            latency (scalar or str): specify time range in seconds
-            avgovertime (str): whether to average over time ('yes', 'no')
-            frequency (scalar or str): specify frequency range in Hz
-            avgoverfreq (str): whether to average over frequency ('yes', 'no')
-            opacitymap (opacitymap for mask data, see ALPHAMAP): 
-            opacitylim (range of mask values to which opacitymap is scaled): 
-            roi (str or cell of strings): region(s) of interest from anatomical atlas
-            location (location of cut): 
-            locationcoordinates (str): coordinate system used in location, 'head' or 'voxel'
-            crosshair (str): whether to show crosshair ('yes', 'no')
-            axis (str): whether to show axis ('on', 'off')
-            queryrange (number): in atlas voxels
-            clim (lower and upper anatomical MRI limits): 
-            nslices (number): number of slices
-            slicerange (range of slices in data): 
-            slicedim (dimension to slice 1 (x-axis) 2(y-axis) 3(z-axis)): 
-            title (str): title of the plot
-            figurename (str): title of the figure window
-            surffile (str): file that contains the surface
-            surfinflated (str): file that contains the inflated surface
-            surfdownsample (number for surface downsampling): 
-            interpmethod (projection method, how functional volume data is projected onto surface, ``'nearest'``, ``'project'``, ``'sphere_avg'``, ``'sphere_weighteddistance'``): 
-            projvec (vector (in mm) to allow different projections): 
-            projcomb ('mean', 'max', method to combine the different projections): 
-            projweight (vector of weights for the different projections): 
-            projthresh (implements thresholding on the surface level): 
-            sphereradius (maximum distance from each voxel to the surface to be included in the sphere projection methods, expressed in mm): 
-            distmat (precomputed distance matrix): 
-            camlight (str): whether to use camlight ('yes', 'no')
-            facecolor ([r g b] values or string for face color): 
-            vertexcolor ([r g b] values or string for vertex color): 
-            edgecolor ([r g b] values or string for edge color): 
-            cloudtype ('point' plots a single point, 'cloud' plots group of points, 'surf' plots surface mesh): 
-            radius (scalar, maximum radius of cloud): 
-            colorgrad ('white' or a scalar, degree to which color of points in cloud changes from its center): 
-            slice (requires 'anatomical' as input, '2d' plots 2D slices, '3d' draws outline, 'none' for no slicing): 
-            ori ('x', 'y', or 'z', specifies the orthogonal plane which will be plotted): 
-            slicepos ('auto' or Nx1 vector specifying the position of the slice plane): 
-            nslices_cloud (scalar, number of slices to plot if slicepos = 'auto'): 
-            minspace (scalar, minimum spacing between slices if nslices>1): 
-            flip (str): whether to flip ('yes', 'no')
-            interactive (str): whether interactive ('yes', 'no')
-            voxelratio (str): display size of the voxel ('data', 'square')
-            axisratio (str): size of the axes ('square', 'voxel', 'data')
-            inputfile (str): input file path
+        Parameters
+        ----------
+        method : str
+            可视化方法，如 'surface', 'ortho', 'slice', 'glassbrain' 等。
+        anaparameter : str, optional
+            解剖数据字段名。
+        funparameter : str
+            功能参数字段名，默认 'powspctrm'。
+        maskparameter : str, optional
+            透明度掩码字段名。
+        maskstyle : str
+            掩码样式，默认 'opacity'。
+        downsample : int
+            降采样因子，默认 1。
+        atlas : str, optional
+            atlas 文件名。
+        visible : str
+            图形是否可见，默认 'off'。
+        figure : str
+            是否打开新图形，默认 'yes'。
+        position : list
+            图形位置和大小 [left, bottom, width, height]。
+        renderer : str
+            渲染器，默认 'opengl'。
+        funcolormap : str or matplotlib Colormap
+            功能数据颜色映射，默认 'jet'。
+        funcolorlim : list, optional
+            功能数据颜色范围 [min, max]。
+        colorbar : str
+            是否显示 colorbar，'yes' 或 'no'。
+        colorbartext : str
+            colorbar 旁文本。
+        latency : float or str, optional
+            时间范围（秒）。
+        avgovertime : str
+            是否对时间平均，默认 'no'。
+        frequency : float or str, optional
+            频率范围（Hz）。
+        avgoverfreq : str
+            是否对频率平均，默认 'no'。
+        opacitymap : str
+            透明度映射，默认 'auto'。
+        opacitylim : str
+            透明度范围，默认 'auto'。
+        roi : str or list of str, optional
+            感兴趣区域。
+        location : optional
+            切割位置。
+        locationcoordinates : str
+            位置坐标系，默认 'head'。
+        crosshair : str
+            是否显示十字线，默认 'yes'。
+        axis : str
+            是否显示坐标轴，默认 'on'。
+        queryrange : int
+            atlas 查询范围，默认 1。
+        clim : list, optional
+            解剖 MRI 颜色范围。
+        nslices : int
+            切片数，默认 1。
+        slicerange : str
+            切片范围，默认 'auto'。
+        slicedim : int
+            切片维度 (1=x, 2=y, 3=z)，默认 3。
+        title : str, optional
+            图形标题。
+        figurename : str, optional
+            图形窗口标题。
+        surffile : str, optional
+            表面文件路径。
+        surfinflated : str, optional
+            膨胀表面文件路径。
+        surfdownsample : int
+            表面降采样因子，默认 1。
+        interpmethod : str
+            投影插值方法，默认 'sphere_weighteddistance'。
+        projvec : optional
+            投影向量 (mm)。
+        projcomb : str
+            投影组合方法，默认 'mean'。
+        projweight : optional
+            投影权重向量。
+        projthresh : optional
+            表面级阈值。
+        sphereradius : float
+            球体投影最大距离 (mm)，默认 5。
+        distmat : optional
+            预计算距离矩阵。
+        camlight : str
+            是否使用 camlight，默认 'no'。
+        facecolor : optional
+            面颜色。
+        vertexcolor : str
+            顶点颜色，默认 'curv'。
+        edgecolor : str
+            边颜色，默认 'none'。
+        cloudtype : str
+            云类型，默认 'cloud'。
+        radius : float
+            云最大半径，默认 4。
+        colorgrad : str
+            云颜色梯度，默认 'white'。
+        slice : str
+            切片模式，默认 'none'。
+        ori : str
+            切片方向，默认 'y'。
+        slicepos : str
+            切片位置，默认 'auto'。
+        nslices_cloud : int
+            云切片数，默认 1。
+        minspace : int
+            最小切片间距，默认 1。
+        flip : str, optional
+            是否翻转。
+        interactive : str
+            是否交互，默认 'yes'。
+        voxelratio : str
+            体素显示比例，默认 'data'。
+        axisratio : str
+            坐标轴比例，默认 'data'。
+        inputfile : str, optional
+            输入文件路径。
         """
 
         # check cmap

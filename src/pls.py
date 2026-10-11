@@ -137,33 +137,33 @@ def build_full_time_axis(
     y_all: np.ndarray,
 ) -> dict:
     """
-    构建完整时间轴的 y_true, y_pred
-    
+    构建完整时间轴的 y_pred 和 valid_mask。
+
     Parameters
     ----------
     n_frames_total : int
-        原始总帧数（经过 selection 之前）
-    alive_indices : np.ndarray
-        经过 selection 后保留的帧索引 (在原始帧坐标中)
+        原始总帧数（经过 selection 之前）。
+    alive_indices : numpy.ndarray
+        经过 selection 后保留的帧索引（在原始帧坐标中）。
     n_train : int
-        训练集帧数（在 alive_indices 坐标系中）
-    y_train_pred : np.ndarray, shape (n_train,)
-        训练集预测值
-    y_test_pred : np.ndarray, shape (n_frames_total - n_train,)
-        测试集预测值
-    y_valid : np.ndarray, shape (len(alive_indices),)
-        所有存活帧的真实值（训练集 + 测试集，按 alive_indices 顺序）        
-    y_all : np.ndarray, shape (n_frames_total,)
-        所有原值
-    
+        训练集帧数（在 alive_indices 坐标系中）。
+    y_train_pred : numpy.ndarray, shape (n_train,)
+        训练集预测值。
+    y_test_pred : numpy.ndarray, shape (len(alive_indices) - n_train,)
+        测试集预测值。
+    y_valid : numpy.ndarray, shape (len(alive_indices),)
+        所有存活帧的真实值（训练集 + 测试集，按 alive_indices 顺序）。
+    y_all : numpy.ndarray, shape (n_frames_total,)
+        所有原始值。
+
     Returns
     -------
     dict
-        {
-            'y_true_full': (n_frames_total,)  存活帧有值，缺失帧 NaN
-            'y_pred_full': (n_frames_total,)  同上
-            'valid_mask': (n_frames_total,)   True 表示该帧存活
-        }
+        包含以下键：
+        - 'y_pred_full' : numpy.ndarray, shape (n_frames_total,)
+          存活帧有预测值，缺失帧为 NaN。
+        - 'valid_mask' : numpy.ndarray, shape (n_frames_total,), dtype bool
+          True 表示该帧存活。
     """
     # y_true_full = np.full(n_frames_total, np.nan, dtype=np.float64)
     y_pred_full = np.full(n_frames_total, np.nan, dtype=np.float64)
@@ -193,25 +193,25 @@ def sliding_r_with_valid_mask(
     step: int,
 ) -> np.ndarray:
     """
-    只在窗口内所有帧都 valid 时计算 r，否则输出 NaN
-    
+    只在窗口内所有帧都 valid 时计算 Pearson r，否则输出 NaN。
+
     Parameters
     ----------
-    y_true : np.ndarray, shape (n_frames,)
-        完整时间轴的真实值
-    y_pred : np.ndarray, shape (n_frames,)
-        完整时间轴的预测值
-    valid_mask : np.ndarray, shape (n_frames,)
-        True 表示该帧有效
+    y_true : numpy.ndarray, shape (n_frames,)
+        完整时间轴的真实值。
+    y_pred : numpy.ndarray, shape (n_frames,)
+        完整时间轴的预测值。
+    valid_mask : numpy.ndarray, shape (n_frames,)
+        True 表示该帧有效。
     window : int
-        滑动窗口大小（帧数）
+        滑动窗口大小（帧数）。
     step : int
-        滑动步长（帧数）
-    
+        滑动步长（帧数）。注意：当前实现未使用此参数，步长固定为 1。
+
     Returns
     -------
-    r_ts : np.ndarray, shape (n_frames,)
-        每个时间点的滑动窗口 r，无效窗口填充 NaN
+    numpy.ndarray, shape (n_frames,)
+        每个时间点的滑动窗口 r，无效窗口填充 NaN。
     """
     n = len(y_true)
     
@@ -250,27 +250,29 @@ def get_annotations_for_edf(
     alive_indices: np.ndarray = None,
 ) -> mne.Annotations:
     """
-    生成导出 EDF 的 annotations
-    
+    生成导出 EDF 所需的 MNE Annotations 对象。
+
+    包含训练/测试集分界标注、缺失帧标注，以及从原始 ECoG 继承的 BAD 标注。
+
     Parameters
     ----------
-    valid_mask : np.ndarray, shape (n_frames_total,)
-        True 表示该帧有效（存活），False 表示缺失
+    valid_mask : numpy.ndarray, shape (n_frames_total,)
+        True 表示该帧有效（存活），False 表示缺失。
     n_train : int
-        训练集帧数（在 alive_indices 坐标系中）
+        训练集帧数（在 alive_indices 坐标系中）。
     sample_start : float
-        sample_start 时间（秒）
+        sample_start 时间（秒）。
     sfreq : float
-        帧率 (Hz)
+        帧率 (Hz)。
     raw_annotations : mne.Annotations, optional
-        原始 ECoG 的 annotations，用于继承 BAD 片段
-    alive_indices : np.ndarray, optional
-        存活帧的原始索引，用于将帧索引转换为时间
-    
+        原始 ECoG 的 annotations，用于继承 BAD 片段。
+    alive_indices : numpy.ndarray, optional
+        存活帧的原始索引，用于将帧索引转换为时间。
+
     Returns
     -------
     mne.Annotations
-        包含所有标注的 Annotations 对象
+        包含所有标注的 Annotations 对象。
     """
     onset_list = []
     duration_list = []
@@ -350,35 +352,29 @@ def export_pred(
     joint_order: list = None,
 ) -> None:
     """
-    导出完整时间轴的预测结果 EDF
-    
+    导出完整时间轴的预测结果 EDF。
+
     Parameters
     ----------
     edf_data : dict
-        每个 joint 包含 y_true_full, y_pred_full, valid_mask, r_ts
-        由 build_full_time_axis 和 sliding_r_with_valid_mask 生成
+        每个 joint 包含 y_pred_full, valid_mask 等键，
+        由 build_full_time_axis 和 sliding_r_with_valid_mask 生成。
     path_edf : Path
-        输出文件路径
+        输出文件路径。
     sfreq : float
-        采样率 (Hz)
+        采样率 (Hz)。
     n_frames_total : int
-        总帧数
-    alive_indices : np.ndarray
-        存活帧的原始索引
-    n_train : int
-        训练集帧数
-    # sample_start : float
-    #     sample_start 时间（秒），用于 annotations 的时间偏移
-    start_time : datetime, optional
-        EDF 起始真实时间
-    raw_annotations : mne.Annotations, optional
-        原始 ECoG annotations，用于继承 BAD 标注
+        总帧数。
+    start_time : datetime.datetime, optional
+        EDF 起始真实时间。
+    annots : mne.Annotations, optional
+        预先生成的 annotations 对象（由 get_annotations_for_edf 生成）。
     window_s : float
-        滑动窗口长度（秒）
+        滑动窗口长度（秒），默认 10.0。
     overlap : float
-        窗口重叠比例 [0, 1)
+        窗口重叠比例 [0, 1)，默认 0.2。
     joint_order : list, optional
-        指定 joint 的导出顺序
+        指定 joint 的导出顺序。
     """
     window = int(window_s * sfreq)
     step = max(1, int(window * (1 - overlap)))

@@ -154,7 +154,19 @@ def cal_kinematics(df_pos: pd.DataFrame, fps: int = 30) -> pd.DataFrame:
     return df_out
 
 def normalize(v: np.ndarray) -> np.ndarray:
-    """逐行归一化 (N,3) → (N,3)，零向量行返回 nan。"""
+    """
+    逐行归一化 (N,3) 向量。
+
+    Parameters
+    ----------
+    v : numpy.ndarray, shape (N, 3)
+        输入向量数组。
+
+    Returns
+    -------
+    numpy.ndarray, shape (N, 3)
+        归一化后的向量；零向量行返回 NaN。
+    """
     n = np.linalg.norm(v, axis=1, keepdims=True)
     with np.errstate(invalid='ignore'):
         return np.where(n > 1e-10, v / n, np.nan)
@@ -166,12 +178,15 @@ def make_frame(primary: np.ndarray, secondary: np.ndarray) -> np.ndarray:
 
     Parameters
     ----------
-    primary   : (N,3) 骨骼主轴向量
-    secondary : (N,3) 横臂向量（无需与 primary 垂直）
+    primary : numpy.ndarray, shape (N, 3)
+        骨骼主轴向量。
+    secondary : numpy.ndarray, shape (N, 3)
+        横臂向量（无需与 primary 垂直）。
 
     Returns
     -------
-    R : (N,3,3)  列向量为 [e1, e2, e3] 的旋转矩阵
+    numpy.ndarray, shape (N, 3, 3)
+        列向量为 [e1, e2, e3] 的旋转矩阵。
     """
     e1 = normalize(primary)
     proj = np.einsum('ni,ni->n', secondary, e1)[:, None] * e1
@@ -186,6 +201,18 @@ def rot_angle(R_prox: np.ndarray, R_dist: np.ndarray) -> np.ndarray:
 
     R_rel = R_dist @ R_prox^T
     θ = arccos((trace(R_rel) − 1) / 2)   ∈ [0°, 180°]
+
+    Parameters
+    ----------
+    R_prox : numpy.ndarray, shape (N, 3, 3)
+        近端旋转矩阵。
+    R_dist : numpy.ndarray, shape (N, 3, 3)
+        远端旋转矩阵。
+
+    Returns
+    -------
+    numpy.ndarray, shape (N,)
+        相对旋转角（度）。
     """
     R_rel = R_dist @ R_prox.transpose(0, 2, 1)
     cos_val = (np.trace(R_rel, axis1=1, axis2=2) - 1) / 2
@@ -195,7 +222,22 @@ def rot_angle(R_prox: np.ndarray, R_dist: np.ndarray) -> np.ndarray:
 def bend_angle(A: np.ndarray, B: np.ndarray, C: np.ndarray) -> np.ndarray:
     """
     三点屈曲角（度）：B 为关节，A 近端，C 远端。
+
     0° = 完全伸展，值越大越弯曲。
+
+    Parameters
+    ----------
+    A : numpy.ndarray, shape (N, 3)
+        近端点坐标。
+    B : numpy.ndarray, shape (N, 3)
+        关节点坐标。
+    C : numpy.ndarray, shape (N, 3)
+        远端点坐标。
+
+    Returns
+    -------
+    numpy.ndarray, shape (N,)
+        屈曲角（度）。
     """
     v1 = normalize(A - B)
     v2 = normalize(C - B)
@@ -211,8 +253,20 @@ def compute_joint_angles(df_pos: pd.DataFrame) -> pd.DataFrame:
     """
     输入位置 DataFrame，返回关节角度 DataFrame。
 
-    局部坐标系定义
-    ──────────────
+    Parameters
+    ----------
+    df_pos : pandas.DataFrame
+        位置数据，双层列索引 (bodypart, dim)，dim 为 'x'/'y'/'z'。
+
+    Returns
+    -------
+    pandas.DataFrame
+        关节角度数据，列为各关节名，值为角度（度）。
+
+    Notes
+    -----
+    局部坐标系定义：
+
     颈 (Neck)
         近端：骨骼轴 = Neck−Back，        横臂 = Shoulder(R)−Shoulder(L)
         远端：骨骼轴 = Head−Neck，         横臂 = Nose−Head
@@ -285,6 +339,20 @@ def compute_angle_vel(df_angle: pd.DataFrame,
     """
     计算各关节的角速度大小（deg/s），恒 ≥ 0。
 
+    Parameters
+    ----------
+    df_angle : pandas.DataFrame
+        关节角度数据，由 compute_joint_angles 返回。
+    df_pos : pandas.DataFrame
+        位置数据，用于重建局部坐标系以计算旋转矩阵关节的帧间增量角。
+
+    Returns
+    -------
+    pandas.DataFrame
+        角速度数据，shape 与 df_angle 相同，首行置零。
+
+    Notes
+    -----
     对颈/躯干/肩/髋（旋转矩阵关节）：
         用帧间增量旋转角 Δθ/Δt，天然非负，无需取绝对值。
     对肘/膝（三点弯折角关节）：
@@ -369,20 +437,24 @@ def quan_to_edf(df_angle: pd.DataFrame, output_path: str,
                   overwrite: bool = True):
     """
     将关节角度 DataFrame 写为 EDF 文件。
- 
-    依赖：mne >= 1.0，edfio（pip install mne edfio）
- 
+
+    依赖：mne >= 1.0，edfio（pip install mne edfio）。
+
     Parameters
     ----------
-    df_angle    : compute_joint_angles() 的返回值
-                  index 为时间（秒），列为各关节角（度）
-    output_path : 输出 .edf 路径
-    overwrite   : 是否覆盖已有文件，默认 True
- 
+    df_angle : pandas.DataFrame
+        compute_joint_angles() 的返回值，
+        index 为时间（秒），列为各关节角（度）。
+    output_path : str
+        输出 .edf 路径。
+    overwrite : bool
+        是否覆盖已有文件，默认 True。
+
     Returns
     -------
-    raw : mne.io.RawArray（同时已写入磁盘）
- 
+    mne.io.RawArray
+        同时已写入磁盘的 RawArray 对象。
+
     Notes
     -----
     EDF 格式的两项硬性限制，函数会自动处理：

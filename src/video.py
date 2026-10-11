@@ -414,7 +414,9 @@ def plot_frame_grid(
     share_lim : if True and `crop` is None, compute ONE auto-crop box from
         the union of keypoints across the *entire* grid and use it,
         identically, for every cell (instead of per-cell auto-crop).
-    brighten : multiplicative gain (float) or (alpha, beta) passed to
+    crop_margin_ratio : float
+        当自动裁剪时，关键点边界框向外扩展的比例，默认 0.3。
+    brighten : float or tuple, optional
         cv2.convertScaleAbs. None to disable.
     scatter_kwargs : kwargs forwarded to ax.scatter() for joints.
     line_kwargs : kwargs forwarded to ax.plot() for skeleton edges.
@@ -581,4 +583,3 @@ def plot_frame_grid(
  
     fig.tight_layout()
     return fig, axes
-

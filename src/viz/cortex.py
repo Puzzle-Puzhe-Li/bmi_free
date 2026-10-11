@@ -307,6 +307,8 @@ def plot_topomap(
         Channel names corresponding to *data* when *data* is an array.
         If omitted, the keys of *montage* (excluding ``_canvas_wh``) are
         used in insertion order.
+    version : str
+        Montage version string, default '64_20250606'.
     ax : matplotlib Axes, optional
         Axes to draw on.  A new figure/axes is created if not supplied.
     figsize : (width, height)
