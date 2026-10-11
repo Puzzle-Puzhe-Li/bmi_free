@@ -37,6 +37,8 @@ from scipy.interpolate import CloughTocher2DInterpolator, RBFInterpolator
 from scipy.spatial.distance import cdist
 from sklearn.preprocessing import MinMaxScaler
 
+from scipy.stats import rankdata
+
 from bmi_free.io import path as _data_path
 
 _HERE = Path(__file__).parent
@@ -50,6 +52,18 @@ _SKIP_CHANNELS = {"L11", "R11"}
 _PROJ_PITCH_DEG = -15.0
 
 ColorSpec = Union[str, tuple, dict, list, np.ndarray]
+
+def _ball_points(n, inner=0.0, seed=0):
+    i = np.arange(n) + 0.5
+    phi = np.arccos(1 - 2 * i / n)
+    theta = np.pi * (1 + 5 ** 0.5) * i
+    u = np.random.default_rng(seed).random(n)
+    r = np.cbrt(inner ** 3 + (1 - inner ** 3) * u)
+    return r[:, None] * np.column_stack([
+        np.cos(theta) * np.sin(phi),
+        np.sin(theta) * np.sin(phi),
+        np.cos(phi),
+    ])
 
 
 # ===========================================================================
@@ -779,25 +793,28 @@ def plot_topomap_grid(
 # 8. Electrode colouring
 # ===========================================================================
 
-def color_elec(df, shrink=0.6):
+def color_elec(df, shrink=0.5, elev=30, wrap=330, equalize=0.9):
     """
-    根据电极的解剖坐标 (r, a, s) 给每个电极分配 RGB 颜色。
+    给电极分配 RGB 颜色：电极在 2D 展开面上绕质心一圈，映射为绕 RGB 立方体
+    黑白对角线（灰轴）一圈。
 
-    同一半球、同一脑区内的电极颜色更接近；左右半球使用同一套 PCA 坐标系
-    （仅用左半球拟合），因此着色镜像对称。
+    - 绕质心的角度  -> 绕灰轴的角度（色相）
+    - 距质心的距离  -> 离灰轴的距离（饱和度，rho=1 恰好落在立方体表面）
+    - 第三主成分    -> 沿灰轴的位置（明度，幅度由 lift 控制）
+    - 同一 (半球, 脑区) 内的电极先向组质心收缩，再计算颜色
+    - 仅用左半球计算，右半球按顺序镜像复用
 
     参数
     ----
-    df : pandas.DataFrame
-        需要包含列 ['r', 'a', 's', 'region']，电极名 (label, 如 'L12', 'R12')
-        可以是索引或一列 'label'，首字母 'L'/'R' 用来判断半球。
-    shrink : float, 默认 0.6
-        每个 (半球, 脑区) 分组内电极向组质心收缩的比例，越接近 1 同区颜色越接近。
+    df : DataFrame，含 ['r', 'a', 's', 'region']，label 为索引或一列
+    shrink : 脑区内向质心收缩的比例，越大同区颜色越接近
+    rho_min : 最小饱和度比例，避免质心附近电极全是灰色
+    lift : 明度随第三主成分变化的幅度（0 表示固定中灰）
+    wrap : 色相覆盖的总角度（度），小于 360 可避免缺口两侧电极同色
 
     返回
     ----
-    dict
-        {label: (R, G, B)}，取值范围 [0, 1]。
+    dict {label: (R, G, B)}，取值 [0, 1]
     """
     df = df.copy().dropna()
 
@@ -807,7 +824,6 @@ def color_elec(df, shrink=0.6):
             df = df.rename(columns={'index': 'label'})
 
     df['hemi'] = df['label'].astype(str).str[0]
-
     coords = df[['r', 'a', 's']].to_numpy(dtype=float)
 
     centroids = (
@@ -820,31 +836,49 @@ def color_elec(df, shrink=0.6):
     left_mask = (df['hemi'] == 'L').to_numpy()
     right_mask = (df['hemi'] == 'R').to_numpy()
 
-    left_coords = shrunk[left_mask]
-    centered_left = left_coords - left_coords.mean(axis=0)
+    left = shrunk[left_mask]
+    left = left - left.mean(axis=0)
+    _, _, Vt = np.linalg.svd(left, full_matrices=False)
+    scores = left @ Vt.T
 
-    _, _, Vt = np.linalg.svd(centered_left, full_matrices=False)
-    components = Vt.copy()
-    left_scores = centered_left @ components.T
+    if np.corrcoef(scores[:, 0], df.loc[left_mask, 'a'])[0, 1] > 0:
+        scores[:, 0] *= -1
+    if np.corrcoef(scores[:, 1], df.loc[left_mask, 'r'])[0, 1] < 0:
+        scores[:, 1] *= -1
 
-    a_left = df.loc[left_mask, 'a'].to_numpy(dtype=float)
-    corr0 = np.corrcoef(left_scores[:, 0], a_left)[0, 1]
-    if corr0 > 0:
-        components[0] *= -1
-        left_scores[:, 0] *= -1
+    ang = np.arctan2(scores[:, 1], scores[:, 0])
+    rad = np.hypot(scores[:, 0], scores[:, 1])
+    n = len(ang)
 
-    pc_min = left_scores.min(axis=0)
-    pc_max = left_scores.max(axis=0)
-    pc_range = np.where(pc_max - pc_min == 0, 1.0, pc_max - pc_min)
+    srt = np.sort(ang)
+    gaps = np.diff(np.append(srt, srt[0] + 2 * np.pi))
+    start = srt[(np.argmax(gaps) + 1) % n]
+    phi = (ang - start) % (2 * np.pi)
 
-    left_norm = np.clip((left_scores - pc_min) / pc_range, 0, 1)
+    def spread(x):
+        lin = (x - x.min()) / (x.max() - x.min())
+        rk = (rankdata(x) - 1) / (len(x) - 1)
+        return (1 - equalize) * lin + equalize * rk
+
+    hue = spread(phi) * np.deg2rad(wrap)
+    lat = (2 * spread(rad) - 1) * np.deg2rad(elev)
+
+    e1 = np.array([2, -1, -1]) / np.sqrt(6)
+    e2 = np.array([0, 1, -1]) / np.sqrt(2)
+    e3 = np.ones(3) / np.sqrt(3)
+    u = (np.cos(lat) * np.cos(hue))[:, None] * e1 \
+        + (np.cos(lat) * np.sin(hue))[:, None] * e2 \
+        + np.sin(lat)[:, None] * e3
+
+    left_norm = 0.5 + 0.5 * u / np.abs(u).max(axis=1, keepdims=True)
+
     right_norm = left_norm
 
     labels_left = df.loc[left_mask, 'label'].to_numpy()
     labels_right = df.loc[right_mask, 'label'].to_numpy()
 
-    order_left = np.argsort(-left_scores[:, 0])
-    order_right = np.argsort(left_scores[:, 0])
+    order_left = np.argsort(-scores[:, 0])
+    order_right = np.argsort(scores[:, 0])
 
     color_dict = {}
     for i in order_left:
