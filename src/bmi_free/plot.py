@@ -805,17 +805,30 @@ def plot_ica_properties_grid(ica, inst, **kwargs):
     """
     picks = kwargs.pop('picks', range(ica.n_components))
     psd_args = kwargs.pop('psd_args', {'fmin': 1, 'fmax': 150})
-    width_ratios = kwargs.pop('width_ratios', (1, 2, 2, 5))
-    var_hist_ratio = kwargs.pop('var_hist_ratio', width_ratios[3]*2)   
+    width_ratios = kwargs.pop('width_ratios', (1, 2, 2, 40))
+    var_hist_ratio = kwargs.pop('var_hist_ratio', width_ratios[3]*3)   
+
+    fs, lw = 2, 0.2   # 字号 (pt) 和线宽 (pt)
+    tick_major, tick_minor = 1.2, 0.7
+    plt.rcParams.update({
+        'font.size': fs, 'axes.labelsize': fs, 'axes.titlesize': fs,
+        'xtick.labelsize': fs, 'ytick.labelsize': fs, 'legend.fontsize': fs,
+        'axes.linewidth': lw, 'lines.linewidth': lw, 'patch.linewidth': lw,
+        'xtick.major.width': lw, 'xtick.minor.width': lw,
+        'ytick.major.width': lw, 'ytick.minor.width': lw,
+        'grid.linewidth': lw,
+    })
+
+
     n_components = len(picks)
 
-    fig = plt.figure(figsize=(10, n_components * 1.5))
+    fig = plt.figure(figsize=(10, n_components * 0.2))
 
     outer = gridspec.GridSpec(
         n_components, 4,
         figure=fig,
         hspace=0.15,
-        wspace=0.35,
+        wspace=0.1,
         width_ratios=list(width_ratios), 
     )
 
@@ -858,6 +871,11 @@ def plot_ica_properties_grid(ica, inst, **kwargs):
             **kwargs
         )
 
+        # ---- PSD y 轴: 主刻度 100，次刻度 10，不显示数字 ----
+        ax_spectrum.yaxis.set_major_locator(ticker.MultipleLocator(100))
+        ax_spectrum.yaxis.set_minor_locator(ticker.MultipleLocator(10))
+        ax_spectrum.tick_params(axis='y', which='both', labelleft=False, labelright=False)
+
         # ---- PSD: x 轴 log，次级刻度每 10 Hz 一格 ----
         ax_spectrum.set_xscale('log')
         ax_spectrum.set_xlim(psd_args.get('fmin', 1), psd_args.get('fmax', 150))
@@ -866,19 +884,35 @@ def plot_ica_properties_grid(ica, inst, **kwargs):
         ax_spectrum.xaxis.set_minor_locator(ticker.MultipleLocator(10))
         ax_spectrum.xaxis.set_minor_formatter(ticker.NullFormatter())
 
-        ax_topo.set_ylabel(f"IC {ic_idx:03d}", fontsize='large')
+        # ---- Epochs 图 (ax_image): 主刻度 300，次刻度 60，不显示数字 ----
+        ax_image.yaxis.set_major_locator(ticker.MultipleLocator(300))
+        ax_image.yaxis.set_minor_locator(ticker.MultipleLocator(60))
+
+        # ---- AU 图 (ax_erp): 每 0.1 一个主刻度，不显示数字 ----
+        ax_erp.yaxis.set_major_locator(ticker.MultipleLocator(0.1))
+
+        # ---- 方差图 (ax_variance): 主刻度 3，次刻度 1，不显示数字 ----
+        ax_variance.yaxis.set_major_locator(ticker.MultipleLocator(3))
+        ax_variance.yaxis.set_minor_locator(ticker.MultipleLocator(1))
+
+        # 三个图都隐藏 y 轴刻度标签（保留刻度线和 y 轴标题）
+        for ax in (ax_image, ax_erp, ax_variance):
+            ax.tick_params(axis='y', which='both', labelleft=False, labelright=False)        
+
+        ax_topo.set_ylabel(f"IC {ic_idx:03d}", fontsize=fs*2)
         for ax in [ax_topo, ax_image, ax_spectrum, ax_variance]:
             ax.set_title("")
         ax_spectrum.set_ylabel("PSD (dB/Hz)")
 
         # 缩小散点
         for collection in ax_variance.collections:
-            collection.set_sizes([4])
+            collection.set_sizes([0.5])
+            collection.set_linewidth(0)
 
         # 对 variance 轴进行自定义刻度
         ax_variance.set_xlim(0, 30 * 60)
-        ax_variance.xaxis.set_major_locator(ticker.MultipleLocator(5 * 60))
-        ax_variance.xaxis.set_minor_locator(ticker.MultipleLocator(1 * 60))
+        ax_variance.xaxis.set_major_locator(ticker.MultipleLocator(1 * 60))
+        ax_variance.xaxis.set_minor_locator(ticker.MultipleLocator(10))
         ax_variance.xaxis.set_major_formatter(
             ticker.FuncFormatter(lambda x, _: f"{int(x/60)}")
         )        
@@ -917,6 +951,26 @@ def plot_ica_properties_grid(ica, inst, **kwargs):
         hist_axes.append((ax_variance, list(extra_axes)))
         known_axes.update(fig.get_axes())  # 记录本行结束后所有已知轴            
 
+    from matplotlib.text import Text
+    from matplotlib.lines import Line2D
+    from matplotlib.patches import Patch
+    from matplotlib.collections import Collection
+
+    for ax in fig.get_axes():
+        for spine in ax.spines.values():
+            spine.set_linewidth(lw)
+        ax.tick_params(which='both', width=lw, labelsize=fs)
+        for obj in ax.findobj(Text):
+            obj.set_fontsize(fs)
+        for obj in ax.findobj(Line2D):
+            obj.set_linewidth(lw)
+        for obj in ax.findobj(Patch):
+            obj.set_linewidth(lw)
+        for obj in ax.findobj(Collection):
+            obj.set_linewidth(lw)
+
+        ax.tick_params(which='major', length=tick_major)
+        ax.tick_params(which='minor', length=tick_minor)
 
     plt.tight_layout()
     fig.align_labels()
