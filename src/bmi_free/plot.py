@@ -795,6 +795,8 @@ def plot_ica_properties_grid(ica, inst, **kwargs):
         支持特殊参数：
         - picks : 范围或列表，选择要绘制的 IC 索引
         - psd_args : dict，传给 PSD 绘制的参数
+        - width_ratios : 长度为 4 的序列，四列（topo / image+ERP / PSD / variance）
+          的相对宽度，默认 (1, 2, 2, 5)                  
 
     Returns
     -------
@@ -802,17 +804,19 @@ def plot_ica_properties_grid(ica, inst, **kwargs):
         绘制好的图形。
     """
     picks = kwargs.pop('picks', range(ica.n_components))
-    psd_args = kwargs.pop('psd_args', {'fmax': 150}) 
+    psd_args = kwargs.pop('psd_args', {'fmin': 1, 'fmax': 150})
+    width_ratios = kwargs.pop('width_ratios', (1, 2, 2, 5))
+    var_hist_ratio = kwargs.pop('var_hist_ratio', width_ratios[3]*2)   
     n_components = len(picks)
 
-    fig = plt.figure(figsize=(12, n_components * 1.5))
+    fig = plt.figure(figsize=(10, n_components * 1.5))
 
     outer = gridspec.GridSpec(
         n_components, 4,
         figure=fig,
         hspace=0.15,
         wspace=0.35,
-        width_ratios=[.8, 1, 1, 1.2],
+        width_ratios=list(width_ratios), 
     )
 
     ref_x = {'topo': None, 'spectrum': None, 'variance': None}
@@ -830,7 +834,8 @@ def plot_ica_properties_grid(ica, inst, **kwargs):
             ref_y[ykey] = ax
         return ax
     
-    known_axes = set()    
+    known_axes = set()  
+    hist_axes = []  
 
     for row, ic_idx in enumerate(picks):
         ax_topo     = add(outer[row, 0], xkey='topo')
@@ -852,6 +857,14 @@ def plot_ica_properties_grid(ica, inst, **kwargs):
             verbose="Critical",
             **kwargs
         )
+
+        # ---- PSD: x 轴 log，次级刻度每 10 Hz 一格 ----
+        ax_spectrum.set_xscale('log')
+        ax_spectrum.set_xlim(psd_args.get('fmin', 1), psd_args.get('fmax', 150))
+        ax_spectrum.xaxis.set_major_locator(ticker.FixedLocator([1, 10, 100]))
+        ax_spectrum.xaxis.set_major_formatter(ticker.ScalarFormatter())
+        ax_spectrum.xaxis.set_minor_locator(ticker.MultipleLocator(10))
+        ax_spectrum.xaxis.set_minor_formatter(ticker.NullFormatter())
 
         ax_topo.set_ylabel(f"IC {ic_idx:03d}", fontsize='large')
         for ax in [ax_topo, ax_image, ax_spectrum, ax_variance]:
@@ -901,12 +914,33 @@ def plot_ica_properties_grid(ica, inst, **kwargs):
             else:
                 ax_extra.set_xticklabels([''] + ax_extra.get_xticklabels()[1:])
 
-
+        hist_axes.append((ax_variance, list(extra_axes)))
         known_axes.update(fig.get_axes())  # 记录本行结束后所有已知轴            
 
 
     plt.tight_layout()
     fig.align_labels()
+
+    # ---- 调整方差散点图 : 直方图 = var_hist_ratio : 1 ----
+    fig.canvas.draw()   # 让 axes_grid1 的 locator 先算出实际位置
+    for ax_var, extras in hist_axes:
+        if not extras:
+            continue
+        ax_hist = max(extras, key=lambda a: a.get_position().x0)   # 最靠右的就是直方图
+        pv, ph = ax_var.get_position(), ax_hist.get_position()
+
+        left, right = pv.x0, ph.x1
+        pad = max(ph.x0 - pv.x1, 0)
+        usable = (right - left) - pad
+        w_scatter = usable * var_hist_ratio / (var_hist_ratio + 1)
+        w_hist = usable / (var_hist_ratio + 1)
+
+        # 去掉 locator，否则 set_position 会被 axes_grid1 覆盖
+        ax_var.set_axes_locator(None)
+        ax_hist.set_axes_locator(None)
+        ax_var.set_position([left, pv.y0, w_scatter, pv.height])
+        ax_hist.set_position([left + w_scatter + pad, ph.y0, w_hist, ph.height])
+
     return fig
 
 if __name__ == "__main__":
