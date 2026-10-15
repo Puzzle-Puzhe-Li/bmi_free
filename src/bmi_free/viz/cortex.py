@@ -70,6 +70,42 @@ def _ball_points(n, inner=0.0, seed=0):
 # 1. Montage
 # ===========================================================================
 
+def _drawing_to_path(drawing, H):
+    verts, codes = [], []
+    cur = None
+
+    def flip(p):
+        return (p.x, H - p.y)
+
+    for item in drawing["items"]:
+        kind = item[0]
+        if kind in ("c", "l"):
+            p_start = item[1]
+            if cur is None or not np.allclose(cur, (p_start.x, p_start.y)):
+                verts.append(flip(p_start))
+                codes.append(MplPath.MOVETO)
+            if kind == "c":
+                _, _, c1, c2, p_end = item
+                verts.extend([flip(c1), flip(c2), flip(p_end)])
+                codes.extend([MplPath.CURVE4] * 3)
+            else:
+                p_end = item[2]
+                verts.append(flip(p_end))
+                codes.append(MplPath.LINETO)
+            cur = (p_end.x, p_end.y)
+        elif kind in ("re", "qu"):
+            obj = item[1]
+            if kind == "re":
+                pts = [(obj.x0, obj.y0), (obj.x1, obj.y0), (obj.x1, obj.y1), (obj.x0, obj.y1)]
+            else:
+                pts = [(obj.ul.x, obj.ul.y), (obj.ur.x, obj.ur.y), (obj.lr.x, obj.lr.y), (obj.ll.x, obj.ll.y)]
+            pts = [(x, H - y) for x, y in pts]
+            verts.extend(pts + [pts[0]])
+            codes.extend([MplPath.MOVETO] + [MplPath.LINETO] * 3 + [MplPath.CLOSEPOLY])
+            cur = None
+    return verts, codes
+
+
 def build_montage(
     elec_xlsx: Union[str, Path, None] = None,
     elec_pdf: Union[str, Path, None] = None,
@@ -266,20 +302,16 @@ def plot_cortical_frame(
     H, W = page.rect.height, page.rect.width
 
     for drawing in page.get_drawings():
-        verts: list[tuple[float, float]] = []
-        codes: list[int] = []
-        for item in drawing["items"]:
-            if item[0] == "c":
-                p1, p2, p3, _p4 = item[1:]
-                if not verts:
-                    verts.append((p1.x, H - p1.y))
-                    codes.append(MplPath.MOVETO)
-                verts.extend([(p1.x, H - p1.y), (p2.x, H - p2.y), (p3.x, H - p3.y)])
-                codes.extend([MplPath.CURVE4] * 3)
+        verts, codes = _drawing_to_path(drawing, H)
         if verts:
             ax.add_patch(PathPatch(
                 MplPath(verts, codes),
-                facecolor="none", edgecolor=edgecolor, alpha=alpha, lw=lw,
+                facecolor="none",
+                edgecolor=edgecolor,
+                alpha=alpha,
+                lw=lw,
+                capstyle="round",
+                joinstyle="round",
             ))
 
     ax.set_xlim(0, W)
@@ -558,19 +590,11 @@ def _pdf_paths_to_mpl(fname: str, H: float) -> list[MplPath]:
     page = fitz.open(fname)[0]
     mpl_paths = []
     for drawing in page.get_drawings():
-        verts: list[tuple[float, float]] = []
-        codes: list[int] = []
-        for item in drawing["items"]:
-            if item[0] == "c":
-                p1, p2, p3, _p4 = item[1:]
-                if not verts:
-                    verts.append((p1.x, H - p1.y))
-                    codes.append(MplPath.MOVETO)
-                verts.extend([(p1.x, H - p1.y), (p2.x, H - p2.y), (p3.x, H - p3.y)])
-                codes.extend([MplPath.CURVE4] * 3)
+        verts, codes = _drawing_to_path(drawing, H)
         if verts:
-            verts.append(verts[0])
-            codes.append(MplPath.CLOSEPOLY)
+            if codes[-1] != MplPath.CLOSEPOLY:
+                verts.append(verts[0])
+                codes.append(MplPath.CLOSEPOLY)
             mpl_paths.append(MplPath(verts, codes))
     return mpl_paths
 
@@ -793,7 +817,7 @@ def plot_topomap_grid(
 # 8. Electrode colouring
 # ===========================================================================
 
-def color_elec(df, shrink=0.5, elev=30, wrap=330, equalize=0.9):
+def color_elec(df, shrink=0.5, elev=40, wrap=360, equalize=0.9):
     """
     给电极分配 RGB 颜色：电极在 2D 展开面上绕质心一圈，映射为绕 RGB 立方体
     黑白对角线（灰轴）一圈。
