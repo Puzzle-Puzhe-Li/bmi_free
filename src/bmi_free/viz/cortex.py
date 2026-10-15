@@ -1,7 +1,6 @@
 """
 cortex.py — Monkey cortical topomap visualization utilities
 ===========================================================
-Three PDFs (cortex.pdf, electrodes.pdf, range.pdf) share one 800x1000-point
 canvas:
   cortex.pdf     cortical outline
   electrodes.pdf electrode positions
@@ -28,6 +27,7 @@ from typing import Optional, Union
 import fitz
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
+from matplotlib.collections import EllipseCollection
 import mne
 import numpy as np
 import pandas as pd
@@ -50,6 +50,7 @@ _ELEC_LOC_PATH = _data_path["config"]
 
 _SKIP_CHANNELS = {"L11", "R11"}
 _PROJ_PITCH_DEG = -15.0
+_DEFAULT_ELEC_DIAMETER_MM = 1.5
 
 ColorSpec = Union[str, tuple, dict, list, np.ndarray]
 
@@ -207,10 +208,10 @@ def _resolve_colors(elec_color: ColorSpec, names: list[str]) -> np.ndarray:
 
 
 def _default_elec_size(ax: plt.Axes, W: float, R: float) -> float:
-    """Marker area (pt^2) whose diameter matches the electrode radius on canvas."""
     bbox = ax.get_window_extent().transformed(ax.get_figure().dpi_scale_trans.inverted())
     data_per_point = (W / bbox.width) / 72.0
-    return (R / data_per_point) ** 2
+    diameter_canvas = _DEFAULT_ELEC_DIAMETER_MM / 25.4 * 72.0
+    return (diameter_canvas / data_per_point) ** 2
 
 
 def _draw_electrodes(
@@ -227,15 +228,13 @@ def _draw_electrodes(
     xy = np.array([ch_xy[n] for n in names])
 
     if show_electrodes:
-        if elec_size is None:
-            elec_size = _default_elec_size(ax, W, R)
-        ax.scatter(
-            xy[:, 0], xy[:, 1],
-            s=elec_size,
-            c=_resolve_colors(elec_color, names),
-            marker="o",
-            zorder=3,
-        )
+        d = elec_size if elec_size is not None else _DEFAULT_ELEC_DIAMETER_MM * 72 / 25.4
+        ax.add_collection(EllipseCollection(
+            widths=d, heights=d, angles=0, units="xy",
+            offsets=xy, offset_transform=ax.transData,
+            facecolors=_resolve_colors(elec_color, names),
+            edgecolors="none", zorder=3,
+        ))
 
     if show_labels:
         kw = dict(fontsize=4, color="k", ha="center", va="bottom", zorder=4)
