@@ -1170,8 +1170,6 @@ def plot_ica_properties(ica, inst, out_dir, picks=None, duration=1.0,
         plt.close(fig)
         paths.append(path)
 
-    return paths
-
 
 if __name__ == "__main__":
     """
