@@ -805,19 +805,21 @@ def plot_ica_properties_grid(ica, inst, **kwargs):
     """
     picks = kwargs.pop('picks', range(ica.n_components))
     psd_args = kwargs.pop('psd_args', {'fmin': 1, 'fmax': 150})
-    width_ratios = kwargs.pop('width_ratios', (1, 2, 2, 40))
+    width_ratios = kwargs.pop('width_ratios', (1, 2, 2, 20))
     var_hist_ratio = kwargs.pop('var_hist_ratio', width_ratios[3]*3)   
 
-    fs, lw = 2, 0.1   # 字号 (pt) 和线宽 (pt)
+    fs, lw = 4, 0.2   # 字号 (pt) 和线宽 (pt)
     tick_major, tick_minor = 1.2, 0.7
-    plt.rcParams.update({
+    rc = {
         'font.size': fs, 'axes.labelsize': fs, 'axes.titlesize': fs,
         'xtick.labelsize': fs, 'ytick.labelsize': fs, 'legend.fontsize': fs,
         'axes.linewidth': lw, 'lines.linewidth': lw, 'patch.linewidth': lw,
         'xtick.major.width': lw, 'xtick.minor.width': lw,
         'ytick.major.width': lw, 'ytick.minor.width': lw,
         'grid.linewidth': lw,
-    })
+    }
+    _rc_ctx = plt.rc_context(rc)
+    _rc_ctx.__enter__()
 
 
     n_components = len(picks)
@@ -827,13 +829,13 @@ def plot_ica_properties_grid(ica, inst, **kwargs):
     components = ica.get_components()          # (n_channels, n_components)
     ica_ch_names = list(ica.ch_names)    
 
-    fig = plt.figure(figsize=(10, n_components * 0.2))
+    fig = plt.figure(figsize=(12, n_components * 0.5))
 
     outer = gridspec.GridSpec(
         n_components, 4,
         figure=fig,
         hspace=0.15,
-        wspace=0.05,
+        wspace=0.2,
         width_ratios=list(width_ratios), 
     )
 
@@ -906,11 +908,11 @@ def plot_ica_properties_grid(ica, inst, **kwargs):
         ax_image.yaxis.set_minor_locator(ticker.MultipleLocator(60))
 
         # ---- AU 图 (ax_erp): 每 0.1 一个主刻度，不显示数字 ----
-        ax_erp.yaxis.set_major_locator(ticker.MultipleLocator(0.1))
+        ax_erp.yaxis.set_major_locator(ticker.MaxNLocator(3))
 
         # ---- 方差图 (ax_variance): 主刻度 3，次刻度 1，不显示数字 ----
-        ax_variance.yaxis.set_major_locator(ticker.MultipleLocator(3))
-        ax_variance.yaxis.set_minor_locator(ticker.MultipleLocator(1))
+        ax_variance.yaxis.set_major_locator(ticker.MaxNLocator(4))
+        ax_variance.yaxis.set_minor_locator(ticker.AutoMinorLocator(3))
 
         # 三个图都隐藏 y 轴刻度标签（保留刻度线和 y 轴标题）
         for ax in (ax_image, ax_erp, ax_variance):
@@ -1015,6 +1017,161 @@ def plot_ica_properties_grid(ica, inst, **kwargs):
         ax_hist.set_position([left + w_scatter + pad, ph.y0, w_hist, ph.height])
 
     return fig
+
+def plot_ica_topomaps(ica, picks=None, ncols=5, panel_size=(1.2, 1.5), **kwargs):
+    import math
+    from bmi_free.viz.cortex import plot_topomap, build_montage
+
+    picks = list(range(ica.n_components)) if picks is None else list(picks)
+    nrows = math.ceil(len(picks) / ncols)
+    montage = build_montage()
+    components = ica.get_components()
+
+    fig, axes = plt.subplots(
+        nrows, ncols,
+        figsize=(ncols * panel_size[0], nrows * panel_size[1]),
+        squeeze=False,
+    )
+    axes = axes.ravel()
+
+    for ax, ic in zip(axes, picks):
+        plot_topomap(
+            components[:, ic],
+            montage=montage,
+            ch_names=list(ica.ch_names),
+            ax=ax,
+            show_colorbar=False,
+            interp_resolution=kwargs.pop('interp_resolution', 150) if False else 150,
+            **kwargs,
+        )
+        ax.set_title(f"IC {ic:03d}", fontsize=8)
+
+    for ax in axes[len(picks):]:
+        ax.axis("off")
+
+    fig.tight_layout()
+    return fig
+
+
+def plot_ica_properties(ica, inst, out_dir, picks=None, duration=1.0,
+                        psd_args=None, figsize=(10, 6), dpi=200,
+                        width_ratios=(8, 1), n_bins=50):
+    from bmi_free.viz.cortex import plot_topomap, build_montage
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    picks = list(range(ica.n_components)) if picks is None else list(picks)
+    psd_args = {'fmin': 1, 'fmax': 150} | (psd_args or {})
+
+    montage = build_montage()
+    components = ica.get_components()
+
+    sources = ica.get_sources(inst)
+    epochs = mne.make_fixed_length_epochs(sources, duration=duration, preload=True, verbose="CRITICAL")
+    src_data = epochs.get_data(picks='all')
+    ep_times = epochs.times
+    t_min = epochs.events[:, 0] / epochs.info['sfreq'] / 60
+
+    psd = epochs.compute_psd(method='welch', picks='all', verbose="CRITICAL", **psd_args)
+    psd_data, psd_freqs = psd.get_data(return_freqs=True)    # (n_epochs, n_ic, n_freqs)
+    psd_db = 10 * np.log10(psd_data)
+
+    paths = []
+    n_ep_min = len(t_min) * duration / 60    
+    for ic in picks:
+        data = src_data[:, ic, :]                       # (n_epochs, n_times)
+        var = data.var(axis=1)
+        lim = np.percentile(np.abs(data), 99)
+
+        fig = plt.figure(figsize=figsize)
+        gs = gridspec.GridSpec(3, 2, figure=fig, width_ratios=list(width_ratios),
+                               height_ratios=[1.2, 1, 1], hspace=0.5, wspace=0.03)
+
+        gs_top = gridspec.GridSpecFromSubplotSpec(1, 2, subplot_spec=gs[0, :],
+                                                  width_ratios=[1, 3], wspace=0.15)
+        ax_topo = fig.add_subplot(gs_top[0])
+        ax_psd = fig.add_subplot(gs_top[1])
+
+        ax_img = fig.add_subplot(gs[1, 0])
+        ax_erp = fig.add_subplot(gs[1, 1], sharey=ax_img)
+        ax_var = fig.add_subplot(gs[2, 0], sharex=ax_img)
+        ax_hist = fig.add_subplot(gs[2, 1], sharey=ax_var)
+
+        plot_topomap(
+            components[:, ic], montage=montage, ch_names=list(ica.ch_names),
+            ax=ax_topo, show_colorbar=False, interp_resolution=150,
+        )
+        ax_topo.set_title(f"IC {ic:03d}")
+
+        p_mean = psd_db[:, ic].mean(axis=0)
+        p_std = psd_db[:, ic].std(axis=0, ddof=1)
+        ax_psd.plot(psd_freqs, p_mean, color='k')
+        ax_psd.fill_between(psd_freqs, p_mean - p_std, p_mean + p_std, color='k', alpha=0.15, lw=0)
+        ax_psd.set_xscale('log')
+        ax_psd.set_xlim(psd_args['fmin'], psd_args['fmax'])
+        ax_psd.set_xlabel("Frequency (Hz)")
+        ax_psd.set_ylabel("PSD (dB/Hz)")
+
+        ax_img.imshow(
+            data.T, aspect='auto', origin='lower', cmap='RdBu_r',
+            vmin=-lim, vmax=lim,
+            extent=[t_min[0], t_min[-1] + duration / 60, ep_times[0], ep_times[-1]],
+        )
+        ax_img.set_ylabel("Epoch time (s)")
+        plt.setp(ax_img.get_xticklabels(), visible=False)
+
+        e_mean = data.mean(axis=0)
+        e_ci = 1.96 * data.std(axis=0, ddof=1) / np.sqrt(data.shape[0])
+        ax_erp.plot(e_mean, ep_times, color='k')
+        ax_erp.fill_betweenx(ep_times, e_mean - e_ci, e_mean + e_ci, color='k', alpha=0.15, lw=0)
+        ax_erp.axvline(0, color='gray', lw=0.5)
+        ax_erp.set_xlabel("AU")
+        plt.setp(ax_erp.get_yticklabels(), visible=False)
+
+        v_hi = np.percentile(var, 99) * 1.1
+        ax_var.scatter(t_min, var, s=1, c='k', linewidths=0)
+        ax_var.set_ylim(0, v_hi)
+        ax_var.set_xlabel("Time (min)")
+        ax_var.set_ylabel("Variance")
+
+        ax_hist.hist(var[var <= v_hi], bins=n_bins, range=(0, v_hi), orientation='horizontal', color='gray')
+        ax_hist.set_xlabel("Count")
+        plt.setp(ax_hist.get_yticklabels(), visible=False)
+
+        for ax in (ax_var, ax_hist):
+            ax.yaxis.set_major_locator(ticker.MaxNLocator(5))
+            ax.yaxis.set_minor_locator(ticker.NullLocator())
+        ax_hist.xaxis.set_major_locator(ticker.MaxNLocator(3))
+        ax_hist.xaxis.set_minor_locator(ticker.NullLocator())      
+
+        ax_psd.set_xscale('log')
+        ax_psd.xaxis.set_major_locator(ticker.FixedLocator([1, 10, 100]))
+        ax_psd.xaxis.set_major_formatter(ticker.ScalarFormatter())
+        ax_psd.xaxis.set_minor_locator(ticker.MultipleLocator(10))
+        ax_psd.xaxis.set_minor_formatter(ticker.NullFormatter())
+        ax_psd.yaxis.set_major_locator(ticker.MultipleLocator(100))
+        ax_psd.yaxis.set_minor_locator(ticker.MultipleLocator(10))
+        ax_psd.tick_params(axis='y', which='both', labelleft=False)
+
+        ax_erp.yaxis.set_major_locator(ticker.MaxNLocator(3))
+        ax_var.yaxis.set_major_locator(ticker.MaxNLocator(4))
+        ax_var.yaxis.set_minor_locator(ticker.AutoMinorLocator(3))
+
+        ax_var.set_xlim(0, n_ep_min)
+        ax_var.xaxis.set_major_locator(ticker.MultipleLocator(max(1, round(n_ep_min / 30))))
+        ax_var.xaxis.set_minor_locator(ticker.MultipleLocator(max(1, round(n_ep_min / 30)) / 6))
+        ax_var.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f"{int(x)}"))
+
+        for ax in (ax_img, ax_erp, ax_var, ax_hist):
+            ax.tick_params(axis='y', which='both', labelleft=False, labelright=False)          
+
+        path = out_dir / f"IC{ic:03d}.png"
+        fig.savefig(path, dpi=dpi, bbox_inches='tight')
+        plt.close(fig)
+        paths.append(path)
+
+    return paths
+
 
 if __name__ == "__main__":
     """
