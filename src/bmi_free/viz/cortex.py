@@ -816,7 +816,7 @@ def plot_topomap_grid(
 # 8. Electrode colouring
 # ===========================================================================
 
-def color_elec(df, shrink=0.5, elev=40, wrap=360, equalize=0.9):
+def color_elec(df, shrink=0.5, elev=-20, wrap=360, equalize=0.9):
     """
     给电极分配 RGB 颜色：电极在 2D 展开面上绕质心一圈，映射为绕 RGB 立方体
     黑白对角线（灰轴）一圈。
