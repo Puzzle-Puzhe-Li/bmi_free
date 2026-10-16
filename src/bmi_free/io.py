@@ -450,14 +450,14 @@ def import_bad(session):
     pandas.DataFrame
         坏段标注表，包含 Onset、Duration、Annotation 列。
     """
-    fname = path['ecog'] / f'annots_{session}_bad.csv'
+    fname = path['ecog'] / f'ecog_{session}_cropped_filtered_rereferred_+ic_annotations.csv'
     df = pd.read_csv(fname)
-    if not df.query('Annotation == "sample_start"').empty:
-        sample_start = df.loc[df['Annotation'] == 'sample_start']['Onset'].values
-        df['Onset'] -= sample_start
-    else:
+    if df.query('Annotation == "sample_start"').empty:
         Warning('No time of sample start')
+        df = pd.concat([df, pd.DataFrame([{'Onset': 1, 'Duration': 0, 'Annotation': 'sample_start'}])], axis=0)
 
+    sample_start = df.loc[df['Annotation'] == 'sample_start']['Onset'].values
+    df['Onset'] -= sample_start
     df = df[df['Annotation'].str.contains('bad', case=False, na=False, regex=False)]
 
     return df
