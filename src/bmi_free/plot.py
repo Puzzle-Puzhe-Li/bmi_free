@@ -1151,7 +1151,6 @@ def plot_ica_properties(ica, inst, out_dir, picks=None, duration=1.0,
         ax_psd.xaxis.set_minor_formatter(ticker.NullFormatter())
         ax_psd.yaxis.set_major_locator(ticker.MultipleLocator(100))
         ax_psd.yaxis.set_minor_locator(ticker.MultipleLocator(10))
-        ax_psd.tick_params(axis='y', which='both', labelleft=False)
 
         ax_erp.yaxis.set_major_locator(ticker.MaxNLocator(3))
         ax_var.yaxis.set_major_locator(ticker.MaxNLocator(4))
@@ -1160,10 +1159,7 @@ def plot_ica_properties(ica, inst, out_dir, picks=None, duration=1.0,
         ax_var.set_xlim(0, n_ep_min)
         ax_var.xaxis.set_major_locator(ticker.MultipleLocator(max(1, round(n_ep_min / 30))))
         ax_var.xaxis.set_minor_locator(ticker.MultipleLocator(max(1, round(n_ep_min / 30)) / 6))
-        ax_var.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f"{int(x)}"))
-
-        for ax in (ax_img, ax_erp, ax_var, ax_hist):
-            ax.tick_params(axis='y', which='both', labelleft=False, labelright=False)          
+        ax_var.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f"{int(x)}"))       
 
         path = out_dir / f"IC{ic:03d}.png"
         fig.savefig(path, dpi=dpi, bbox_inches='tight')
