@@ -1149,8 +1149,8 @@ def plot_ica_properties(ica, inst, out_dir, picks=None, duration=1.0,
         ax_psd.xaxis.set_major_formatter(ticker.ScalarFormatter())
         ax_psd.xaxis.set_minor_locator(ticker.MultipleLocator(10))
         ax_psd.xaxis.set_minor_formatter(ticker.NullFormatter())
-        ax_psd.yaxis.set_major_locator(ticker.MultipleLocator(100))
-        ax_psd.yaxis.set_minor_locator(ticker.MultipleLocator(10))
+        ax_psd.yaxis.set_major_locator(ticker.MultipleLocator(10))
+        ax_psd.yaxis.set_minor_locator(ticker.MultipleLocator(5))
 
         ax_erp.yaxis.set_major_locator(ticker.MaxNLocator(3))
         ax_var.yaxis.set_major_locator(ticker.MaxNLocator(4))
