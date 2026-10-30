@@ -39,7 +39,7 @@ from sklearn.preprocessing import MinMaxScaler
 
 from scipy.stats import rankdata
 
-from bmi_free.io import path as _data_path
+from bmi_free.io import path as _data_path, import_elec_loc
 
 _HERE = Path(__file__).parent
 _ASSET_DIR = _HERE / "cortex"
@@ -362,26 +362,72 @@ def _align_data(data, ch_names, montage_ch_xy):
         warnings.warn(f"channels not in montage (skipped): {missing}")
     return kept, np.array(xy), np.array(out)
 
+def _reference_edges(names, version, column="reference"):
+    df = import_elec_loc(postfix=f"_{version}")
+    idx = {n: i for i, n in enumerate(names)}
+    edges = set()
+    for label, refs in df[column].dropna().items():
+        if label not in idx:
+            continue
+        for r in str(refs).split():
+            if r in idx and r != label:
+                edges.add(tuple(sorted((idx[label], idx[r]))))
+    linked = {i for e in edges for i in e}
+    edges.update((i, i) for i in range(len(names)) if i not in linked)
+    return np.array(sorted(edges), dtype=int)
+
+
+def _reference_interp(xy_pts, values, edges, query, sigma_ratio=0.5, chunk=50000):
+    A = xy_pts[edges[:, 0]]
+    B = xy_pts[edges[:, 1]]
+    AB = B - A
+    len2 = np.maximum((AB ** 2).sum(1), 1e-12)
+    lens = np.sqrt((AB ** 2).sum(1))
+    sigma = sigma_ratio * np.median(lens[lens > 0])
+    va, vb = values[edges[:, 0]], values[edges[:, 1]]
+
+    out = np.empty(len(query))
+    for s in range(0, len(query), chunk):
+        q = query[s:s + chunk]
+        rel = q[:, None, :] - A[None]
+        t = np.clip((rel * AB[None]).sum(-1) / len2, 0, 1)
+        d2 = ((rel - t[..., None] * AB[None]) ** 2).sum(-1)
+        w = np.exp(-(d2 - d2.min(1, keepdims=True)) / sigma ** 2)
+        lin = va[None] + t * (vb - va)[None]
+        out[s:s + chunk] = (w * lin).sum(1) / w.sum(1)
+    return out
 
 def _draw_heatmap(
     ax, xy_pts, values, W, H,
     range_pdf, mask_outside, cmap, vmin, vmax, symmetric_cmap, interp_resolution,
+    names=None, version="64_20250606",
+    interp_method="reference", ref_col="reference", ref_sigma=0.5,
 ):
     nx = int(interp_resolution * W / min(W, H))
     ny = int(interp_resolution * H / min(W, H))
     grid_x, grid_y = np.meshgrid(np.linspace(0, W, nx), np.linspace(0, H, ny))
 
-    grid_z = CloughTocher2DInterpolator(xy_pts, values)(grid_x, grid_y)
-
     mask = None
     if mask_outside:
         range_path = range_pdf if range_pdf is not None else _DEFAULT_RANGE
         mask = _build_range_mask(str(range_path), grid_x, grid_y, H)
-        nan_in_mask = mask & ~np.isfinite(grid_z)
-        if nan_in_mask.any():
-            rbf = RBFInterpolator(xy_pts, values, kernel="cubic")
-            query = np.column_stack([grid_x[nan_in_mask], grid_y[nan_in_mask]])
-            grid_z[nan_in_mask] = np.clip(rbf(query), values.min(), values.max())
+
+    if interp_method == "reference":
+        edges = _reference_edges(names, version, ref_col)
+        grid_z = np.full(grid_x.shape, np.nan)
+        sel = mask if mask is not None else np.ones(grid_x.shape, dtype=bool)
+        query = np.column_stack([grid_x[sel], grid_y[sel]])
+        grid_z[sel] = _reference_interp(xy_pts, values, edges, query, ref_sigma)
+    else:
+        grid_z = CloughTocher2DInterpolator(xy_pts, values)(grid_x, grid_y)
+        if mask is not None:
+            nan_in_mask = mask & ~np.isfinite(grid_z)
+            if nan_in_mask.any():
+                rbf = RBFInterpolator(xy_pts, values, kernel="cubic")
+                query = np.column_stack([grid_x[nan_in_mask], grid_y[nan_in_mask]])
+                grid_z[nan_in_mask] = np.clip(rbf(query), values.min(), values.max())
+
+    if mask is not None:
         grid_z[~mask] = np.nan
 
     finite = grid_z[np.isfinite(grid_z)]
@@ -414,6 +460,7 @@ def _draw_heatmap(
     return im
 
 
+
 def plot_heatmap(
     data: Union[np.ndarray, dict],
     ax: Optional[plt.Axes] = None,
@@ -427,15 +474,21 @@ def plot_heatmap(
     vmax: Optional[float] = None,
     symmetric_cmap: bool = True,
     interp_resolution: int = 1000,
+    interp_method: str = "reference",
+    ref_col: str = "reference",
+    ref_sigma: float = 0.5,
 ):
     """Draw only the interpolated heatmap on *ax*.  Returns the AxesImage."""
     if ax is None:
         ax = plt.gca()
     montage, W, H, _R, ch_xy = _montage_info(montage, version)
     _, xy_pts, values = _align_data(data, ch_names, ch_xy)
+    kept, xy_pts, values = _align_data(data, ch_names, ch_xy)
     return _draw_heatmap(
         ax, xy_pts, values, W, H,
         range_pdf, mask_outside, cmap, vmin, vmax, symmetric_cmap, interp_resolution,
+        names=kept, version=version,
+        interp_method=interp_method, ref_col=ref_col, ref_sigma=ref_sigma,
     )
 
 
@@ -470,6 +523,9 @@ def plot_topomap(
     vmax: Optional[float] = None,
     symmetric_cmap: bool = True,
     interp_resolution: int = 1000,
+    interp_method: str = "reference",
+    ref_col: str = "reference",
+    ref_sigma: float = 0.5,
     # --- colorbar ---
     show_colorbar: bool = True,
     cbar_label: str = "",
@@ -501,6 +557,8 @@ def plot_topomap(
     im = _draw_heatmap(
         ax, xy_pts, values, W, H,
         range_pdf, mask_outside, cmap, vmin, vmax, symmetric_cmap, interp_resolution,
+        names=kept, version=version,
+        interp_method=interp_method, ref_col=ref_col, ref_sigma=ref_sigma,
     )
 
     if show_colorbar:
