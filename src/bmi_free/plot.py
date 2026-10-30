@@ -1077,7 +1077,7 @@ def plot_ica_properties(ica, inst, out_dir, picks=None, duration=1.0,
     psd_db = 10 * np.log10(psd_data)
 
     paths = []
-    n_ep_min = len(t_min) * duration / 60    
+    n_ep_min = t_min[-1] + duration / 60    
     for ic in picks:
         data = src_data[:, ic, :]                       # (n_epochs, n_times)
         var = data.var(axis=1)
