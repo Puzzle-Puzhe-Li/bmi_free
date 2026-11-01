@@ -641,7 +641,7 @@ def import_ecog_features(session, monkey=None, fn_postfix='', num_packages=None)
 
 def import_pos(session, monkey=None, postfix=""):
     """
-    导入原始位置数据。
+    导入标准化后对设定FPS插值的关键点位置数据。
 
     Parameters
     ----------
@@ -665,7 +665,7 @@ def import_pos(session, monkey=None, postfix=""):
 
 def import_coor(session, monkey=None, postfix="_standardized"):
     """
-    导入标准化后的坐标数据。
+    导入重建关键点坐标数据。
 
     Parameters
     ----------
