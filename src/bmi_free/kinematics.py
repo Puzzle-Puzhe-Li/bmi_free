@@ -540,3 +540,245 @@ def quan_to_edf(df_angle: pd.DataFrame, output_path: str,
 #         print("用法: python kinematics.py <input.csv> [output.csv]")
 #         sys.exit(1)
 #     process_file(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else None)
+
+
+"""
+segments.py
+-----------
+关键点位置 -> 段的局部角速度（大小，deg/s）。
+
+段：Pelvis, Thorax, Head,
+    UpperArm(L/R), LowerArm(L/R), UpperLeg(L/R), LowerLeg(L/R)
+
+每个段输出相对其父段的旋转速度大小，Pelvis 相对世界系。
+索引 t 处的值是 t-1 到 t 之间的旋转。
+
+    from bmi_free.segments import save_session, import_segment_angvel
+    save_session('A0')
+    save_session('A0', smooth_win=3)
+    df = import_segment_angvel('A0', postfix='_smoothed')
+"""
+
+import numpy as np
+import pandas as pd
+
+from bmi_free.io import import_pos, path, _sess_str
+from bmi_free.features import select_coors
+
+
+POINT_ALIAS = {'Thigh(L)': 'Hip(L)', 'Thigh(R)': 'Hip(R)'}
+
+SIDES = ('L', 'R')
+
+TRUNK = {
+    'Pelvis': dict(points=('Sacrum', 'Back', 'Hip(L)', 'Hip(R)'),
+                   axis=('Sacrum', 'Back'), lateral=('Hip(L)', 'Hip(R)')),
+    'Thorax': dict(points=('Back', 'Neck', 'Shoulder(L)', 'Shoulder(R)'),
+                   axis=('Back', 'Neck'), lateral=('Shoulder(L)', 'Shoulder(R)')),
+}
+
+HEAD_POINTS = ('Neck', 'Head', 'Nose')
+
+LIMBS = (
+    dict(limb='Forelimb', prox='Shoulder', mid='Elbow', dist='Wrist',
+         upper='UpperArm', lower='LowerArm', trunk='Thorax'),
+    dict(limb='Hindlimb', prox='Hip', mid='Knee', dist='Ankle',
+         upper='UpperLeg', lower='LowerLeg', trunk='Pelvis'),
+)
+
+SEGMENTS = ['Pelvis', 'Thorax', 'Head'] + [
+    f"{lim[k]}({s})" for lim in LIMBS for k in ('upper', 'lower') for s in SIDES
+]
+
+
+def _build_tables():
+    parent = {'Pelvis': None, 'Thorax': 'Pelvis', 'Head': 'Thorax'}
+    depends = {
+        'Pelvis': list(TRUNK['Pelvis']['points']),
+        'Thorax': list(TRUNK['Pelvis']['points']) + list(TRUNK['Thorax']['points']),
+        'Head': list(HEAD_POINTS) + list(TRUNK['Thorax']['points']),
+    }
+    group = {'Pelvis': 'Trunk', 'Thorax': 'Trunk', 'Head': 'Head'}
+    for lim in LIMBS:
+        trunk_pts = list(TRUNK[lim['trunk']]['points'])
+        for s in SIDES:
+            p, m, d = (f"{lim[k]}({s})" for k in ('prox', 'mid', 'dist'))
+            up, lo = f"{lim['upper']}({s})", f"{lim['lower']}({s})"
+            parent[up], parent[lo] = lim['trunk'], up
+            depends[up] = [p, m] + trunk_pts
+            depends[lo] = [p, m, d] + trunk_pts
+            group[up] = group[lo] = lim['limb']
+    depends = {k: list(dict.fromkeys(v)) for k, v in depends.items()}
+    return parent, depends, group
+
+
+PARENT, DEPENDS, GROUP = _build_tables()
+
+
+def _T(R):
+    return np.swapaxes(R, -1, -2)
+
+
+def rot_angle_between(Ra, Rb):
+    R = Rb @ _T(Ra)
+    v = np.stack([R[..., 2, 1] - R[..., 1, 2],
+                  R[..., 0, 2] - R[..., 2, 0],
+                  R[..., 1, 0] - R[..., 0, 1]], axis=-1)
+    s = np.linalg.norm(v, axis=-1) / 2
+    c = (np.trace(R, axis1=-2, axis2=-1) - 1) / 2
+    return np.arctan2(s, c)
+
+
+def rot_speed(R, dt):
+    w = np.full(len(R), np.nan)
+    w[1:] = np.degrees(rot_angle_between(R[:-1], R[1:])) / dt
+    return w
+
+
+def vec_speed(U, dt):
+    w = np.full(len(U), np.nan)
+    a, b = U[:-1], U[1:]
+    w[1:] = np.degrees(np.arctan2(np.linalg.norm(np.cross(a, b), axis=1),
+                                  np.einsum('ni,ni->n', a, b))) / dt
+    return w
+
+
+def to_local(R, u):
+    return np.einsum('nji,nj->ni', R, u)
+
+
+def kabsch_frames(P, names, primary, secondary, return_resid=False):
+    """
+    多点刚体拟合，返回 (T, 3, 3) 旋转矩阵（参考系 -> 世界系），无效帧为 NaN。
+    参考形状由粗框架（primary/secondary）下各点局部坐标的中位数给出。
+    return_resid=True 时同时返回 (T, 点数) 的逐点拟合残差。
+    """
+    X = np.stack([P[n] for n in names], axis=1)
+    Xc = X - X.mean(axis=1, keepdims=True)
+    R0 = make_frame(P[primary[1]] - P[primary[0]], P[secondary[1]] - P[secondary[0]])
+    valid = np.isfinite(X).all(axis=(1, 2)) & np.isfinite(R0).all(axis=(1, 2))
+
+    local = np.einsum('nji,nkj->nki', R0[valid], Xc[valid])
+    ref = np.median(local, axis=0)
+    ref = ref - ref.mean(axis=0)
+
+    H = np.einsum('ki,nkj->nij', ref, Xc[valid])
+    U, _, Vt = np.linalg.svd(H)
+    d = np.sign(np.linalg.det(U @ Vt))
+    D = np.tile(np.eye(3), (len(d), 1, 1))
+    D[:, 2, 2] = d
+    Q = U @ D @ Vt
+
+    R = np.full((len(X), 3, 3), np.nan)
+    R[valid] = _T(Q)
+    if not return_resid:
+        return R
+    E = np.full(X.shape[:2], np.nan)
+    E[valid] = np.linalg.norm(Xc[valid] - ref @ Q, axis=2)
+    return R, E
+
+
+def trunk_frame(P, name, return_resid=False):
+    spec = TRUNK[name]
+    return kabsch_frames(P, list(spec['points']), spec['axis'], spec['lateral'], return_resid)
+
+
+def segment_speeds(P, fps, times=None):
+    """返回 (local, world)，两个 DataFrame，列为 SEGMENTS。"""
+    dt = 1 / fps
+    R_pel = trunk_frame(P, 'Pelvis')
+    R_tho = trunk_frame(P, 'Thorax')
+    R_skull = make_frame(P['Head'] - P['Neck'], P['Nose'] - P['Head'])
+    R_trunk = {'Pelvis': R_pel, 'Thorax': R_tho}
+
+    local, world = {}, {}
+    local['Pelvis'] = world['Pelvis'] = rot_speed(R_pel, dt)
+    local['Thorax'] = rot_speed(_T(R_pel) @ R_tho, dt)
+    world['Thorax'] = rot_speed(R_tho, dt)
+    local['Head'] = rot_speed(_T(R_tho) @ R_skull, dt)
+    world['Head'] = rot_speed(R_skull, dt)
+
+    for lim in LIMBS:
+        R_par = R_trunk[lim['trunk']]
+        lat = R_par[:, :, 1]
+        for s in SIDES:
+            p, m, d = (f"{lim[k]}({s})" for k in ('prox', 'mid', 'dist'))
+            up, lo = f"{lim['upper']}({s})", f"{lim['lower']}({s})"
+            u = normalize(P[m] - P[p])
+            v = normalize(P[d] - P[m])
+
+            local[up] = vec_speed(to_local(R_par, u), dt)
+            world[up] = vec_speed(u, dt)
+
+            R_seg = make_frame(u, lat)
+            local[lo] = vec_speed(to_local(R_seg, v), dt)
+            world[lo] = vec_speed(v, dt)
+
+    local = pd.DataFrame(local)[SEGMENTS]
+    world = pd.DataFrame(world)[SEGMENTS]
+    if times is not None:
+        local.index = world.index = pd.Index(times, name='t')
+    return local, world
+
+
+def valid_mask(P, times=None):
+    """每个段在 t 处是否可算：DEPENDS 里的所有点在 t-1 和 t 都有效。"""
+    finite = {n: np.isfinite(x).all(axis=1) for n, x in P.items()}
+    ok = {}
+    for seg in SEGMENTS:
+        f = np.logical_and.reduce([finite[n] for n in DEPENDS[seg]])
+        v = np.zeros(len(f), bool)
+        v[1:] = f[1:] & f[:-1]
+        ok[seg] = v
+    df = pd.DataFrame(ok)[SEGMENTS]
+    if times is not None:
+        df.index = pd.Index(times, name='t')
+    return df
+
+
+def load_points(session, smooth_win=None):
+    """
+    读取 import_pos，按 bad_miss 把缺失帧置 NaN，Thigh 点更名为 Hip。
+    smooth_win 给定时，在置 NaN 之后做居中滑动平均；窗口内有缺失的帧置 NaN。
+    """
+    df = import_pos(session)
+    times = df.index.to_numpy(dtype=float)
+    P = {}
+    for j in df.columns.get_level_values(0).unique():
+        x = df[j][['x', 'y', 'z']].to_numpy(dtype=float)
+        ok = np.zeros(len(times), bool)
+        ok[select_coors(session, j, times)[0]] = True
+        x[~ok] = np.nan
+        P[POINT_ALIAS.get(j, j)] = x
+    if smooth_win:
+        P = {j: pd.DataFrame(x).rolling(smooth_win, center=True, min_periods=smooth_win).mean().to_numpy()
+             for j, x in P.items()}
+    return P, times
+
+
+def compute_session(session, smooth_win=None):
+    P, times = load_points(session, smooth_win)
+    fps = 1 / np.median(np.diff(times))
+    local, world = segment_speeds(P, fps, times)
+    return P, local, world
+
+
+def segment_angvel_file(session, kind='local', postfix=''):
+    name = 'segment_angvel' if kind == 'local' else f'segment_angvel_{kind}'
+    return path['coor'] / f'{name}_{_sess_str(session, None)}{postfix}.csv'
+
+
+def save_session(session, smooth_win=None, postfix=None):
+    """写出 local 与 world 两个文件，返回两个路径。"""
+    if postfix is None:
+        postfix = '_smoothed' if smooth_win else ''
+    _, local, world = compute_session(session, smooth_win)
+    files = {}
+    for kind, df in (('local', local), ('world', world)):
+        files[kind] = segment_angvel_file(session, kind, postfix)
+        df.to_csv(files[kind])
+    return files
+
+
+def import_segment_angvel(session, kind='local', postfix=''):
+    return pd.read_csv(segment_angvel_file(session, kind, postfix), index_col=0)

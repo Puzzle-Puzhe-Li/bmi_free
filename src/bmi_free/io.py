@@ -130,7 +130,7 @@ def import_fps(session, monkey=None, stage='quan'):
         df_quan, _, _ = import_cartesian_quan(session=session)
         fps = (df_quan.shape[0] - 1) / (df_quan.index[-1] - df_quan.index[0])       
     elif stage == 'update':
-        fps = import_session_info(session)['fps']
+        fps = import_session_info(session, if_select=False)['fps']
     elif stage == 'setting':
         fps = 30
     else:
@@ -210,7 +210,7 @@ def import_session_info(session=None, if_select=True):
 
     if if_select:
         df = df.query('selected == 1')
-
+    
     if session is not None:
         df = df.loc[session]
 
