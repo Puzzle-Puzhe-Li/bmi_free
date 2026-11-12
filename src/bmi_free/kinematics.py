@@ -586,8 +586,11 @@ LIMBS = (
          upper='UpperLeg', lower='LowerLeg', trunk='Pelvis'),
 )
 
-SEGMENTS = ['Pelvis', 'Thorax', 'Head'] + [
-    f"{lim[k]}({s})" for lim in LIMBS for k in ('upper', 'lower') for s in SIDES
+SEGMENTS = [
+    'Head', 
+    'UpperArm(L)', 'LowerArm(L)', 'UpperArm(R)', 'LowerArm(R)',
+    'Thorax', 'Pelvis',
+    'UpperLeg(L)', 'LowerLeg(L)', 'UpperLeg(R)', 'LowerLeg(R)',
 ]
 
 
@@ -721,12 +724,13 @@ def segment_speeds(P, fps, times=None):
     return local, world
 
 
-def valid_mask(P, times=None):
-    """每个段在 t 处是否可算：DEPENDS 里的所有点在 t-1 和 t 都有效。"""
-    finite = {n: np.isfinite(x).all(axis=1) for n, x in P.items()}
+def valid_mask(bad, times=None, pad=0):
+    if pad:
+        bad = {n: np.convolve(b.astype(float), np.ones(2 * pad + 1), mode='same') > 0
+               for n, b in bad.items()}
     ok = {}
     for seg in SEGMENTS:
-        f = np.logical_and.reduce([finite[n] for n in DEPENDS[seg]])
+        f = ~np.logical_or.reduce([bad[n] for n in DEPENDS[seg]])
         v = np.zeros(len(f), bool)
         v[1:] = f[1:] & f[:-1]
         ok[seg] = v
@@ -737,24 +741,23 @@ def valid_mask(P, times=None):
 
 
 def load_points(session, smooth_win=None):
-    """
-    读取 import_pos，按 bad_miss 把缺失帧置 NaN，Thigh 点更名为 Hip。
-    smooth_win 给定时，在置 NaN 之后做居中滑动平均；窗口内有缺失的帧置 NaN。
-    """
     df = import_pos(session)
     times = df.index.to_numpy(dtype=float)
-    P = {}
-    for j in df.columns.get_level_values(0).unique():
-        x = df[j][['x', 'y', 'z']].to_numpy(dtype=float)
-        ok = np.zeros(len(times), bool)
-        ok[select_coors(session, j, times)[0]] = True
-        x[~ok] = np.nan
-        P[POINT_ALIAS.get(j, j)] = x
+    P = {POINT_ALIAS.get(j, j): df[j][['x', 'y', 'z']].to_numpy(dtype=float)
+         for j in df.columns.get_level_values(0).unique()}
     if smooth_win:
-        P = {j: pd.DataFrame(x).rolling(smooth_win, center=True, min_periods=smooth_win).mean().to_numpy()
+        P = {j: pd.DataFrame(x).rolling(smooth_win, center=True, min_periods=1).mean().to_numpy()
              for j, x in P.items()}
     return P, times
 
+def load_bad(session, times, points):
+    inv = {v: k for k, v in POINT_ALIAS.items()}
+    bad = {}
+    for j in points:
+        ok = np.zeros(len(times), bool)
+        ok[select_coors(session, inv.get(j, j), times)[0]] = True
+        bad[j] = ~ok
+    return bad
 
 def compute_session(session, smooth_win=None):
     P, times = load_points(session, smooth_win)
