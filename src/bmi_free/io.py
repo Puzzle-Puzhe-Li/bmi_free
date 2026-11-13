@@ -462,7 +462,7 @@ def import_bad(session):
 
     return df
 
-def import_miss(session, monkey=None, query=None, pad=0):
+def import_miss(session, monkey=None, query=None, pad=0, manual=True):
     """
     导入缺失标注表 (bad_miss)。
 
@@ -476,19 +476,24 @@ def import_miss(session, monkey=None, query=None, pad=0):
         若提供，则对 DataFrame 执行 df.query(query) 筛选。
     pad : float
         对每段缺失区间向两侧扩展的时间（秒），Onset 减半、Duration 增加。
+    manual : bool
+        若 True（默认），读取手动标注的坏段表 (annots_{session}_bad_miss_manual.csv)，
+        每个坏段对所有关节生效；若 False，读取按关节标注的 xlsx 表。        
 
     Returns
     -------
     pandas.DataFrame
         包含 Onset、Duration、Joint 列的缺失标注表。
     """
-    fname = path['coor'] / f'annots_{session}_bad_miss.xlsx'
-
-    df = pd.read_excel(fname)
+    if manual:
+        df = pd.read_csv(path['coor'] / f'annots_{session}_bad_miss_manual.csv')
+    else:
+        df = pd.read_excel(path['coor'] / f'annots_{session}_bad_miss.xlsx')
+        df['Joint'] = df['Joint'].astype(str)
 
     df['Onset'] = df['Onset'].astype(float) - pad / 2
     df['Duration'] = df['Duration'].astype(float) + pad
-    df['Joint'] = df['Joint'].astype(str)
+
     if query is not None:
         df = df.query(query)
 
@@ -521,19 +526,28 @@ def import_miss_annots(session, joint=None, query=None, description='bad_miss', 
 
     df = import_miss(session, query=query)
     if joint is not None:
-        df = df[df['Joint'] == joint].copy()
+        if 'Joint' in df.columns:
+            df = df[df['Joint'] == joint].copy()
 
     if df.empty:
         return mne.Annotations(onset=[], duration=[], description=[])
 
     descr = [description] * len(df)
-    return mne.Annotations(
-        onset=df['Onset'].to_numpy(dtype=float),
-        duration=df['Duration'].to_numpy(dtype=float),
-        description=np.asarray(descr, dtype=str),
-        ch_names=[ [j] for j in df['Joint'].tolist() ],
-        orig_time=orig_time
-    )
+    if 'Joint' in df.columns:
+        return mne.Annotations(
+            onset=df['Onset'].to_numpy(dtype=float),
+            duration=df['Duration'].to_numpy(dtype=float),
+            description=np.asarray(descr, dtype=str),
+            ch_names=[ [j] for j in df['Joint'].tolist() ],
+            orig_time=orig_time
+        )
+    else:
+        return mne.Annotations(
+            onset=df['Onset'].to_numpy(dtype=float),
+            duration=df['Duration'].to_numpy(dtype=float),
+            description=np.asarray(descr, dtype=str),
+            orig_time=orig_time
+        )
 
 def import_involvement(session, query=None, pad=0, postfix="_sorted"):
     """
