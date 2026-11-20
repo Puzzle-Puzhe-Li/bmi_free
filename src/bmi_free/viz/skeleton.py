@@ -713,6 +713,7 @@ def plot_skeleton_animation(
     show_poles=False,
     show_walls=False,
     show_axis=False,
+    **kwargs,
 ):
     """
     渲染逐帧动画并导出为视频。
@@ -769,7 +770,7 @@ def plot_skeleton_animation(
     Vs = [_coor_row_to_V(coor.iloc[i]) for i in range(len(coor))]
 
     if isinstance(bounds, str) or isinstance(bounds, (list, tuple, np.ndarray)):
-        global_bounds = _parse_bounds(bounds, Vs, bound_scale, joints=joints)
+        parsed_bounds = _parse_bounds(bounds, Vs, bound_scale, joints=joints)
     else:
         _, parsed_bounds = _compute_bounds(Vs)
         parsed_bounds = _pad_bounds(parsed_bounds)
@@ -782,7 +783,12 @@ def plot_skeleton_animation(
     edges_m = _to_matlab_idx(edge_idx)
     faces_m = _to_matlab_idx(tri_idx)
     bounds_m = matlab.double(list(parsed_bounds))
-    view_m = _to_matlab_view(view)
+    view_m = _to_matlab_view(view if view is not None else (150, 10))
+    extra = []
+    for k, v in kwargs.items():
+        if isinstance(v, np.ndarray):
+            v = matlab.double(v.tolist())
+        extra += [k, v]    
 
     eng.plot_skeleton(
         "animation", V_all_m, edges_m, faces_m, bounds_m, float(fps), filename,
@@ -791,7 +797,8 @@ def plot_skeleton_animation(
         "show_poles", bool(show_poles),
         "show_walls", bool(show_walls),
         "show_axis", bool(show_axis),
-        "view_az_el", view_m,
+        "view", view_m,
+        *extra,
         nargout=0,
     )
     print(f"视频已保存: {filename}")

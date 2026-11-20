@@ -120,6 +120,7 @@ for k = 1:n
     opts.bound = b;
 
     plot_cage(ax, opts);
+    camzoom(ax, 1.3);
     plot_skeleton_core(ax, V, edges, faces, opts);
 
     if ~isempty(titles) && k <= numel(titles) && ~isempty(titles{k})
@@ -165,6 +166,12 @@ arguments
     opts.show_walls (1,1) logical = false
     opts.show_axis (1,1) logical = false
     opts.view double = []
+    opts.vert_color (:,3) double = zeros(0,3)
+    opts.vert_size (1,1) double = 20
+    opts.color_limb (1,1) logical = false
+    opts.line_width (1,1) double = 1    
+    opts.face_color = 'w'
+    opts.face_alpha (1,1) double = 0.7
 end
 
 numFrames = size(V_all, 1);
@@ -175,11 +182,11 @@ open(v);
 
 fig = figure('Color', 'w', 'Visible', opts.visible);
 ax = axes(fig);
-plot_cage(ax, 'bounds', bounds, 'show_floor', opts.show_floor, 'show_poles', opts.show_poles, ...
-    'show_walls', opts.show_walls, 'show_axis', opts.show_axis, 'view', opts.view);
+opts.bound = bounds;
+plot_cage(ax, opts);
 
 V0 = squeeze(V_all(1, :, :));
-[hVerts, hEdges, hFaces] = plot_skeleton_core(ax, V0, edges, faces);
+[hVerts, hEdges, hFaces] = plot_skeleton_core(ax, V0, edges, faces, opts);
 
 for frame = 1:numFrames
     V = squeeze(V_all(frame, :, :));
@@ -361,7 +368,8 @@ arguments
 end
 
 axes(ax); hold(ax, 'on');
-c = get(opts, 'vert_color', zeros(size(V, 1), 3));
+c = get(opts, 'vert_color', []);
+if isempty(c), c = zeros(size(V, 1), 3); end
 
 if get(opts, 'marker_joint', false)
 
@@ -413,17 +421,28 @@ for i = 1:size(edges,1)
 end
 
 hFaces = [];
+fc = get(opts, 'face_color', 'w');
+if ischar(fc) && startsWith(fc, '#')
+    fc = hex2rgb_local(fc);
+end
 if ~isempty(faces)
     hFaces = patch(ax, 'Vertices', V, 'Faces', faces, ...
-        'FaceColor', get(opts, 'face_color', 'w'), ...
+        'FaceColor', fc, ...
         'FaceAlpha', get(opts, 'face_alpha', 0.7), ...
         'EdgeColor', get(opts, 'edge_color', 'k'));
 end
 
-camtarget(V(10, :));
+if get(opts, 'cam_target', false)
+    camtarget(V(10, :));
+end
 
 end
 
 function v = get(opts, k, default)
 if isfield(opts, k), v = opts.(k); else, v=default; end
+end
+
+function rgb = hex2rgb_local(hex)
+hex = erase(hex, '#');
+rgb = [hex2dec(hex(1:2)), hex2dec(hex(3:4)), hex2dec(hex(5:6))] / 255;
 end
