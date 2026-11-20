@@ -649,6 +649,17 @@ def vec_speed(U, dt):
 def to_local(R, u):
     return np.einsum('nji,nj->ni', R, u)
 
+def swing_speed(u, v, dt):
+    a, b = u[:-1], u[1:]
+    k = np.cross(a, b)
+    c = np.einsum('ni,ni->n', a, b)[:, None]
+    x = v[:-1]
+    qx = x + np.cross(k, x) + np.cross(k, np.cross(k, x)) / (1 + c)
+    w = np.full(len(v), np.nan)
+    w[1:] = np.degrees(np.arctan2(np.linalg.norm(np.cross(qx, v[1:]), axis=1),
+                                  np.einsum('ni,ni->n', qx, v[1:]))) / dt
+    return w
+
 
 def kabsch_frames(P, names, primary, secondary, return_resid=False):
     """
@@ -703,7 +714,6 @@ def segment_speeds(P, fps, times=None):
 
     for lim in LIMBS:
         R_par = R_trunk[lim['trunk']]
-        lat = R_par[:, :, 1]
         for s in SIDES:
             p, m, d = (f"{lim[k]}({s})" for k in ('prox', 'mid', 'dist'))
             up, lo = f"{lim['upper']}({s})", f"{lim['lower']}({s})"
@@ -713,8 +723,7 @@ def segment_speeds(P, fps, times=None):
             local[up] = vec_speed(to_local(R_par, u), dt)
             world[up] = vec_speed(u, dt)
 
-            R_seg = make_frame(u, lat)
-            local[lo] = vec_speed(to_local(R_seg, v), dt)
+            local[lo] = swing_speed(to_local(R_par, u), to_local(R_par, v), dt)
             world[lo] = vec_speed(v, dt)
 
     local = pd.DataFrame(local)[SEGMENTS]

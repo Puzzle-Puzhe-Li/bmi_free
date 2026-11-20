@@ -685,7 +685,7 @@ def select_coors(session, joint, times, query=None, involvement=None):
         有效帧的索引数组。
     """
     
-    df_miss = import_miss(session, query=query)
+    df_miss = import_miss(session, query=query, manual=False)
 
     df_miss = df_miss[df_miss['Joint'] == joint]
 
