@@ -416,8 +416,13 @@ for i = 1:size(edges,1)
 
     end
 
+    lw = get(opts, 'line_width', 1);
+    if any(ismember(edges(i,:), 12:17))
+        lw = lw * get(opts, 'leg_ratio', 3);
+    end
+
     pts = V(edges(i,:), :);
-    hEdges(i) = plot3(ax, pts(:,1), pts(:,2), pts(:,3), 'Color' ,edge_color, 'LineWidth', get(opts, 'line_width', 1));
+    hEdges(i) = plot3(ax, pts(:,1), pts(:,2), pts(:,3), 'Color', edge_color, 'LineWidth', lw);
 end
 
 hFaces = [];
